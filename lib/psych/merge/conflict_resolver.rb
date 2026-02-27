@@ -76,18 +76,11 @@ module Psych
           # Build refined matches for nodes that don't match by signature
           @refined_matches = build_refined_matches(template_nodes, dest_nodes, template_by_sig, dest_by_sig)
 
-          # Track which nodes have been processed
-          processed_template_sigs = ::Set.new
-          processed_dest_sigs = ::Set.new
-
           # Process nodes via emitter
           merge_nodes_to_emitter(
             template_nodes,
             dest_nodes,
             template_by_sig,
-            dest_by_sig,
-            processed_template_sigs,
-            processed_dest_sigs,
           )
 
           # Transfer emitter output to result
@@ -144,7 +137,7 @@ module Psych
         end
       end
 
-      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, dest_by_sig, processed_template_sigs, processed_dest_sigs, depth: 0)
+      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)
         # Build reverse lookup from dest_node to template_node for refined matches
         refined_dest_to_template = @refined_matches.invert
 
@@ -286,8 +279,31 @@ module Psych
         # Both must have nested mapping or sequence values
         return false unless template_node.respond_to?(:mapping?) && dest_node.respond_to?(:mapping?)
 
-        (template_node.mapping? && dest_node.mapping?) ||
-          (template_node.sequence? && dest_node.sequence?)
+        if template_node.mapping? && dest_node.mapping?
+          true
+        elsif template_node.sequence? && dest_node.sequence?
+          # Flow sequences (e.g., `key: [val1, val2]`) occupy the same physical
+          # line as their key.  Recursing into them would emit the key line via
+          # emit_recursive_merge AND then re-emit it via emit_sequence_item,
+          # producing a duplicate.  Only recurse when the value spans additional
+          # lines beyond the key (block sequence).
+          !flow_sequence?(template_node) && !flow_sequence?(dest_node)
+        else
+          false
+        end
+      end
+
+      # Detect flow sequences where the value occupies the same line(s) as the key.
+      # A flow sequence like `github: [pboling]` has key and value on the same
+      # start_line, so emitting the key line separately would duplicate content.
+      #
+      # @param node [MappingEntry, NodeWrapper] Node to check
+      # @return [Boolean] true when the sequence value starts on the same line as the key
+      def flow_sequence?(node)
+        return false unless node.respond_to?(:key) && node.respond_to?(:value)
+        return false unless node.key && node.value
+
+        node.key.start_line == node.value.start_line
       end
 
       # Emit a recursively merged node
@@ -366,24 +382,11 @@ module Psych
           nested_template_by_sig[sig] << {node: entry, index: idx}
         end
 
-        nested_dest_by_sig = {}
-        dest_nested.each_with_index do |entry, idx|
-          sig = [:mapping_entry, entry.key_name]
-          nested_dest_by_sig[sig] ||= []
-          nested_dest_by_sig[sig] << {node: entry, index: idx}
-        end
-
         # Recursively merge nested entries
-        processed_template_sigs = ::Set.new
-        processed_dest_sigs = ::Set.new
-
         merge_nodes_to_emitter(
           template_nested,
           dest_nested,
           nested_template_by_sig,
-          nested_dest_by_sig,
-          processed_template_sigs,
-          processed_dest_sigs,
           depth: depth + 1,
         )
       end

@@ -589,5 +589,120 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("dest_only")
       end
     end
+
+    describe "flow sequence handling" do
+      it "does not duplicate entries with flow sequence values like github: [pboling]" do
+        yaml = <<~YAML
+          buy_me_a_coffee: pboling
+          community_bridge:
+          github: [pboling]
+          issuehunt: pboling
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(yaml)
+        dest_analysis = Psych::Merge::FileAnalysis.new(yaml)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output.scan("github:").count).to eq(1),
+          "Expected github: to appear once but found #{output.scan("github:").count} times:\n#{output}"
+      end
+
+      it "treats flow sequences atomically using template preference" do
+        template = <<~YAML
+          github: [new_user]
+        YAML
+        dest = <<~YAML
+          github: [old_user]
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("new_user")
+        expect(output).not_to include("old_user")
+        expect(output.scan("github:").count).to eq(1)
+      end
+
+      it "treats flow sequences atomically using destination preference" do
+        template = <<~YAML
+          github: [new_user]
+        YAML
+        dest = <<~YAML
+          github: [old_user]
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("old_user")
+        expect(output).not_to include("new_user")
+        expect(output.scan("github:").count).to eq(1)
+      end
+
+      it "still recursively merges block sequences spanning multiple lines" do
+        template = <<~YAML
+          AllCops:
+            Exclude:
+              - vendor/**/*
+              - tmp/**/*
+        YAML
+        dest = <<~YAML
+          AllCops:
+            Exclude:
+              - vendor/**/*
+              - node_modules/**/*
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        # Dest items preserved
+        expect(output).to include("vendor/**/*")
+        expect(output).to include("node_modules/**/*")
+        # Template-only item added
+        expect(output).to include("tmp/**/*")
+      end
+    end
   end
 end

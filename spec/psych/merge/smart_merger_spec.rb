@@ -724,4 +724,109 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).not_to include("remove_this/**/*")
     end
   end
+
+  describe "FUNDING.yml-style flow sequences" do
+    it "does not duplicate entries with flow sequence values" do
+      funding = <<~YAML
+        # These are supported funding model platforms
+
+        buy_me_a_coffee: pboling
+        community_bridge: # Replace with a single Community Bridge project-name e.g., cloud-foundry
+        github: [pboling] # Replace with up to 4 GitHub Sponsors-enabled usernames e.g., [user1, user2]
+        issuehunt: pboling # Replace with a single IssueHunt username
+        ko_fi: pboling # Replace with a single Ko-fi username
+        liberapay: pboling # Replace with a single Liberapay username
+        open_collective: kettle-rb
+        patreon: galtzo # Replace with a single Patreon username
+        polar: pboling
+        thanks_dev: u/gh/pboling
+        tidelift: rubygems/kettle-jem
+      YAML
+
+      merger = described_class.new(
+        funding,
+        funding,
+        preference: :template,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result.scan("github:").count).to eq(1),
+        "Expected github: to appear once but found #{result.scan("github:").count} times:\n#{result}"
+      expect(result.scan("buy_me_a_coffee:").count).to eq(1)
+      expect(result.scan("tidelift:").count).to eq(1)
+    end
+
+    it "uses template value for flow sequences with preference: :template" do
+      template = <<~YAML
+        github: [new_maintainer]
+        ko_fi: pboling
+      YAML
+      dest = <<~YAML
+        github: [old_maintainer]
+        ko_fi: pboling
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+      )
+      result = merger.merge
+
+      expect(result).to include("new_maintainer")
+      expect(result).not_to include("old_maintainer")
+      expect(result.scan("github:").count).to eq(1)
+    end
+
+    it "uses destination value for flow sequences with preference: :destination" do
+      template = <<~YAML
+        github: [new_maintainer]
+        ko_fi: pboling
+      YAML
+      dest = <<~YAML
+        github: [old_maintainer]
+        ko_fi: pboling
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :destination,
+      )
+      result = merger.merge
+
+      expect(result).to include("old_maintainer")
+      expect(result).not_to include("new_maintainer")
+      expect(result.scan("github:").count).to eq(1)
+    end
+
+    it "handles mixed flow and block sequences in the same file" do
+      template = <<~YAML
+        github: [pboling]
+        AllCops:
+          Exclude:
+            - vendor/**/*
+            - tmp/**/*
+      YAML
+      dest = <<~YAML
+        github: [pboling]
+        AllCops:
+          Exclude:
+            - vendor/**/*
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :destination,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result.scan("github:").count).to eq(1)
+      expect(result).to include("vendor/**/*")
+      expect(result).to include("tmp/**/*")
+    end
+  end
 end

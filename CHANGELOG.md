@@ -22,17 +22,27 @@ Please file a bug if you notice a violation of semantic versioning.
 
 ### Changed
 
+- **BREAKING**: `ConflictResolver#merge_nodes_to_emitter` signature simplified to
+  `merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)`.
+  Removed `processed_template_sigs`, `processed_dest_sigs`, and `dest_by_sig`
+  parameters. Signature matching now uses cursor-based positional matching
+  (consumed indices + per-signature cursor) internally, ensuring multiple nodes
+  with the same signature are matched 1:1 in order rather than collapsed.
+  The `nested_dest_by_sig` build in `emit_recursive_mapping_merge` was also
+  removed as dead code.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
 
-- ConflictResolver no longer collapses nodes that share the same signature. Uses
-  cursor-based positional matching (consumed indices + per-signature cursor) instead
-  of `processed_*_sigs` Sets. While duplicate keys are invalid in YAML mappings,
-  the recursive merge already scopes each level, and this fix ensures correctness
-  for any edge cases where the same key signature appears multiple times.
+- Fix flow sequence duplication in recursive merge. YAML entries with flow sequence
+  values (e.g., `github: [pboling]`) were duplicated because `can_merge_recursively?`
+  returned `true` for sequences, causing `emit_recursive_merge` to emit the key line,
+  then `emit_sequence_item` to re-emit the same physical line. Flow sequences (where
+  the value occupies the same line as the key) are now treated atomically.
+  Reported via kettle-jem self-test against `.github/FUNDING.yml`.
 
 ### Security
 
