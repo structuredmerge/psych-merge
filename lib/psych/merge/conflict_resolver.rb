@@ -148,6 +148,12 @@ module Psych
         # Build reverse lookup from dest_node to template_node for refined matches
         refined_dest_to_template = @refined_matches.invert
 
+        # Track consumed individual node indices (not just signatures) so that
+        # multiple nodes sharing the same signature are matched 1:1 in order
+        # rather than collapsed into a single match.
+        consumed_template_indices = ::Set.new
+        sig_cursor = Hash.new(0)
+
         # First pass: Process destination nodes and find matches
         dest_nodes.each do |dest_node|
           dest_sig = @dest_analysis.generate_signature(dest_node)
@@ -155,64 +161,85 @@ module Psych
           # Freeze blocks from destination are always preserved
           if freeze_node?(dest_node)
             emit_freeze_block(dest_node)
-            processed_dest_sigs << dest_sig if dest_sig
             next
           end
 
           # Check for signature match first
           if dest_sig && template_by_sig[dest_sig]
-            # Found matching node in template
-            template_info = template_by_sig[dest_sig].first
-            template_node = template_info[:node]
+            # Find the next unconsumed template node with this signature
+            candidates = template_by_sig[dest_sig]
+            cursor = sig_cursor[dest_sig]
+            template_info = nil
 
-            # Check if we should recursively merge nested structures
-            if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
-              emit_recursive_merge(template_node, dest_node, depth: depth)
-            else
-              emit_preferred_node(template_node, dest_node)
+            while cursor < candidates.size
+              candidate = candidates[cursor]
+              unless consumed_template_indices.include?(candidate[:index])
+                template_info = candidate
+                break
+              end
+              cursor += 1
             end
 
-            processed_dest_sigs << dest_sig
-            processed_template_sigs << dest_sig
+            if template_info
+              template_node = template_info[:node]
+
+              # Check if we should recursively merge nested structures
+              if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
+                emit_recursive_merge(template_node, dest_node, depth: depth)
+              else
+                emit_preferred_node(template_node, dest_node)
+              end
+
+              consumed_template_indices << template_info[:index]
+              sig_cursor[dest_sig] = cursor + 1
+            else
+              # All template copies consumed — destination-only duplicate
+              unless @remove_template_missing_nodes
+                emit_node(dest_node, @dest_analysis)
+              end
+            end
           elsif refined_dest_to_template.key?(dest_node)
             # Found refined match
             template_node = refined_dest_to_template[dest_node]
             template_sig = @template_analysis.generate_signature(template_node)
 
+            # Find and consume the matching template index
+            if template_sig && template_by_sig[template_sig]
+              template_by_sig[template_sig].each do |info|
+                unless consumed_template_indices.include?(info[:index])
+                  consumed_template_indices << info[:index]
+                  break
+                end
+              end
+            end
+
             # Check if we should recursively merge nested structures
             if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
               emit_recursive_merge(template_node, dest_node, depth: depth)
             else
               emit_preferred_node(template_node, dest_node)
             end
-
-            processed_dest_sigs << dest_sig if dest_sig
-            processed_template_sigs << template_sig if template_sig
           else
             # Destination-only node
             # If remove_template_missing_nodes is enabled, skip this node (remove it)
             unless @remove_template_missing_nodes
               emit_node(dest_node, @dest_analysis)
             end
-            processed_dest_sigs << dest_sig if dest_sig
           end
         end
 
         # Second pass: Add template-only nodes if configured
         return unless @add_template_only_nodes
 
-        template_nodes.each do |template_node|
-          template_sig = @template_analysis.generate_signature(template_node)
-
-          # Skip if already processed (matched with dest)
-          next if template_sig && processed_template_sigs.include?(template_sig)
+        template_nodes.each_with_index do |template_node, idx|
+          # Skip if consumed by a match in the first pass
+          next if consumed_template_indices.include?(idx)
 
           # Skip freeze blocks from template
           next if freeze_node?(template_node)
 
           # Add template-only node
           emit_node(template_node, @template_analysis)
-          processed_template_sigs << template_sig if template_sig
         end
       end
 

@@ -28,6 +28,12 @@ Please file a bug if you notice a violation of semantic versioning.
 
 ### Fixed
 
+- ConflictResolver no longer collapses nodes that share the same signature. Uses
+  cursor-based positional matching (consumed indices + per-signature cursor) instead
+  of `processed_*_sigs` Sets. While duplicate keys are invalid in YAML mappings,
+  the recursive merge already scopes each level, and this fix ensures correctness
+  for any edge cases where the same key signature appears multiple times.
+
 ### Security
 
 ## [1.0.0] - 2026-02-19
