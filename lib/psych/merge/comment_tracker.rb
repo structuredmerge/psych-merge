@@ -53,7 +53,7 @@ module Psych
         @comments.select { |c| range.cover?(c[:line]) }
       end
 
-      # Get leading comments before a line (consecutive comment lines immediately above)
+      # Get leading comments before a line (comment lines above, skipping blank lines)
       #
       # @param line_num [Integer] 1-based line number
       # @return [Array<Hash>] Leading comments
@@ -61,12 +61,18 @@ module Psych
         leading = []
         current = line_num - 1
 
+        # Skip blank lines between the node and its leading comments
+        current -= 1 while current >= 1 && blank_line?(current)
+
         while current >= 1
           comment = comment_at(current)
           break unless comment && comment[:full_line]
 
           leading.unshift(comment)
           current -= 1
+
+          # Skip blank lines between consecutive comments
+          current -= 1 while current >= 1 && blank_line?(current)
         end
 
         leading

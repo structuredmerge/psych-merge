@@ -488,11 +488,19 @@ module Psych
       def emit_node(node, analysis)
         return if freeze_node?(node)
 
-        # Emit leading comments
+        # Emit leading comments and any blank line separator before the node
         if node.respond_to?(:start_line) && node.start_line
           leading = analysis.comment_tracker.leading_comments_before(node.start_line)
-          leading.each do |comment|
-            @emitter.emit_tracked_comment(comment)
+          unless leading.empty?
+            leading.each do |comment|
+              @emitter.emit_tracked_comment(comment)
+            end
+            # Preserve blank line between comments and the node if one existed
+            last_comment_line = leading.last[:line]
+            if node.start_line - last_comment_line > 1 &&
+                analysis.comment_tracker.blank_line?(last_comment_line + 1)
+              @emitter.emit_blank_line
+            end
           end
         end
 

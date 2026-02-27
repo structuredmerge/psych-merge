@@ -43,6 +43,11 @@ Please file a bug if you notice a violation of semantic versioning.
   then `emit_sequence_item` to re-emit the same physical line. Flow sequences (where
   the value occupies the same line as the key) are now treated atomically.
   Reported via kettle-jem self-test against `.github/FUNDING.yml`.
+- Fix leading comment preservation when a blank line separates the comment from the
+  first mapping entry. `CommentTracker#leading_comments_before` now skips blank lines
+  when searching upward for comments. `emit_node` now emits the blank line separator
+  between comments and the node when one existed in the original source.
+  Reported via kettle-jem self-test against `.github/FUNDING.yml`.
 
 ### Security
 

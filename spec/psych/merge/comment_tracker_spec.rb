@@ -233,4 +233,62 @@ RSpec.describe Psych::Merge::CommentTracker do
       expect(tracker.comments).to be_empty
     end
   end
+
+  describe "#leading_comments_before" do
+    it "finds a comment immediately above the node" do
+      source = <<~YAML
+        # header comment
+        key: value
+      YAML
+
+      tracker = described_class.new(source)
+      leading = tracker.leading_comments_before(2)
+      expect(leading.size).to eq(1)
+      expect(leading.first[:text]).to eq("header comment")
+    end
+
+    it "finds a comment separated from the node by a blank line" do
+      source = <<~YAML
+        # These are supported funding model platforms
+
+        buy_me_a_coffee: pboling
+      YAML
+
+      tracker = described_class.new(source)
+      leading = tracker.leading_comments_before(3)
+      expect(leading.size).to eq(1)
+      expect(leading.first[:text]).to eq("These are supported funding model platforms")
+    end
+
+    it "finds multiple comments separated by blank lines" do
+      source = <<~YAML
+        # First comment
+
+        # Second comment
+
+        key: value
+      YAML
+
+      tracker = described_class.new(source)
+      leading = tracker.leading_comments_before(5)
+      expect(leading.size).to eq(2)
+      expect(leading.first[:text]).to eq("First comment")
+      expect(leading.last[:text]).to eq("Second comment")
+    end
+
+    it "does not cross a non-comment non-blank line" do
+      source = <<~YAML
+        # Orphan comment
+        other_key: something
+
+        # Relevant comment
+        key: value
+      YAML
+
+      tracker = described_class.new(source)
+      leading = tracker.leading_comments_before(5)
+      expect(leading.size).to eq(1)
+      expect(leading.first[:text]).to eq("Relevant comment")
+    end
+  end
 end

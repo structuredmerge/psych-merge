@@ -726,6 +726,45 @@ RSpec.describe Psych::Merge::SmartMerger do
   end
 
   describe "FUNDING.yml-style flow sequences" do
+    it "preserves leading comments separated by a blank line" do
+      funding = <<~YAML
+        # These are supported funding model platforms
+
+        buy_me_a_coffee: pboling
+        github: [pboling]
+      YAML
+
+      merger = described_class.new(
+        funding,
+        funding,
+        preference: :template,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# These are supported funding model platforms"),
+        "Leading comment was stripped from merge output:\n#{result}"
+    end
+
+    it "preserves the blank line between leading comment and first entry" do
+      funding = <<~YAML
+        # These are supported funding model platforms
+
+        buy_me_a_coffee: pboling
+      YAML
+
+      merger = described_class.new(
+        funding,
+        funding,
+        preference: :template,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to match(/funding model platforms\n\nbuy_me_a_coffee/),
+        "Blank line between comment and first entry was not preserved:\n#{result}"
+    end
+
     it "does not duplicate entries with flow sequence values" do
       funding = <<~YAML
         # These are supported funding model platforms
