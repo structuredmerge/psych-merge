@@ -147,9 +147,41 @@ module Psych
         consumed_template_indices = ::Set.new
         sig_cursor = Hash.new(0)
 
+        # Track previous node end_line to preserve inter-node blank lines.
+        # Blank lines between top-level YAML sections (e.g., between `name:` and `on:`)
+        # are not part of any node or comment — they are purely visual separators.
+        # We preserve them from the destination to maintain readability.
+        prev_end_line = nil
+
         # First pass: Process destination nodes and find matches
         dest_nodes.each do |dest_node|
           dest_sig = @dest_analysis.generate_signature(dest_node)
+
+          # Preserve inter-node blank lines from destination
+          if prev_end_line && dest_node.respond_to?(:start_line) && dest_node.start_line
+            # Determine the effective start line (before leading comments)
+            effective_start = dest_node.start_line
+            if @dest_analysis.respond_to?(:comment_tracker)
+              leading = @dest_analysis.comment_tracker.leading_comments_before(dest_node.start_line)
+              effective_start = leading.first[:line] if leading.any? && leading.first[:line]
+            end
+
+            # Emit blank lines that existed between the previous node and this one
+            gap_start = prev_end_line + 1
+            if gap_start < effective_start
+              (gap_start...effective_start).each do |line_num|
+                if @dest_analysis.respond_to?(:comment_tracker) &&
+                    @dest_analysis.comment_tracker.blank_line?(line_num)
+                  @emitter.emit_blank_line
+                end
+              end
+            end
+          end
+
+          # Update tracking for the current node's end line
+          if dest_node.respond_to?(:end_line) && dest_node.end_line
+            prev_end_line = dest_node.end_line
+          end
 
           # Freeze blocks from destination are always preserved
           if freeze_node?(dest_node)

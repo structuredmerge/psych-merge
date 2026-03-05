@@ -31,23 +31,25 @@ Please file a bug if you notice a violation of semantic versioning.
   The `nested_dest_by_sig` build in `emit_recursive_mapping_merge` was also
   removed as dead code.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
+- `ConflictResolver#merge_nodes_to_emitter` now preserves inter-node blank lines
+  from the destination, so visual spacing between YAML sections (e.g., between
+  `name:` and `on:` in GitHub Actions workflows) is maintained after merge
 - Fix flow sequence duplication in recursive merge. YAML entries with flow sequence
   values (e.g., `github: [pboling]`) were duplicated because `can_merge_recursively?`
   returned `true` for sequences, causing `emit_recursive_merge` to emit the key line,
   then `emit_sequence_item` to re-emit the same physical line. Flow sequences (where
   the value occupies the same line as the key) are now treated atomically.
-  Reported via kettle-jem self-test against `.github/FUNDING.yml`.
-- Fix leading comment preservation when a blank line separates the comment from the
+- Fix leading comment association when blank lines separate comments from the
   first mapping entry. `CommentTracker#leading_comments_before` now skips blank lines
   when searching upward for comments. `emit_node` now emits the blank line separator
   between comments and the node when one existed in the original source.
   Reported via kettle-jem self-test against `.github/FUNDING.yml`.
+
+### Deprecated
+
+### Removed
 
 ### Security
 
