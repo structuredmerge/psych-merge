@@ -12,28 +12,28 @@
 
 ## ⚠️ AI Agent Terminal Limitations
 
-### Terminal Output Is Not Visible
+### Terminal Output Is Available, but Each Command Is Isolated
 
-**CRITICAL**: AI agents using `run_in_terminal` almost never see the command output. The terminal tool sends commands to a persistent Copilot terminal, but output is frequently lost or invisible to the agent.
+**CRITICAL**: AI agents can reliably read terminal output when commands run in the background and the output is polled afterward. However, each terminal command should be treated as a fresh shell with no shared state.
 
-**Workaround**: Always redirect output to a file in the project's local `tmp/` directory, then read it back with `read_file`:
+### Use `mise` for Project Environment
 
-```bash
-bundle exec rspec spec/some_spec.rb > tmp/test_output.txt 2>&1
-```
-
-**NEVER** use `/tmp` or other system directories — always use the project's own `tmp/` directory.
-
-### direnv Requires Separate `cd` Command
-
-**CRITICAL**: Never chain `cd` with other commands via `&&`. The `direnv` environment won't initialize until after all chained commands finish. Run `cd` alone first:
+**CRITICAL**: The canonical project environment now lives in `mise.toml`, with local overrides in `.env.local` loaded via `dotenvy`.
 
 ✅ **CORRECT**:
 ```bash
-cd /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge
+mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- bundle exec rspec
 ```
+
+✅ **CORRECT**:
 ```bash
-bundle exec rspec > tmp/test_output.txt 2>&1
+eval "$(mise env -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -s bash)" && bundle exec rspec
+```
+
+❌ **WRONG**:
+```bash
+cd /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge
+bundle exec rspec
 ```
 
 ❌ **WRONG**:
@@ -51,7 +51,7 @@ This project is a nested git project inside the `ast-merge` workspace. The `grep
 
 ### NEVER Pipe Test Commands Through head/tail
 
-Always redirect to a file in `tmp/` instead of truncating output.
+Run the plain command and inspect the full output afterward. Do not truncate test output.
 
 ## 🏗️ Architecture: Format-Specific Implementation
 
@@ -111,22 +111,22 @@ spec/psych/merge/
 
 ```bash
 # Full suite (required for coverage thresholds)
-bundle exec rspec
+mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- bundle exec rspec
 
 # Single file (disable coverage threshold check)
-K_SOUP_COV_MIN_HARD=false bundle exec rspec spec/psych/merge/smart_merger_spec.rb
+mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- env K_SOUP_COV_MIN_HARD=false bundle exec rspec spec/psych/merge/smart_merger_spec.rb
 ```
 
-**Note**: Always run commands in the project root (`/home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge`). Allow `direnv` to load environment variables first by doing a plain `cd` before running commands.
+**Note**: Always make commands self-contained. Use `mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- ...` so the command gets the project environment in the same invocation.
 
 ### Coverage Reports
 
 ```bash
-cd /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge
-bin/rake coverage && bin/kettle-soup-cover -d
+mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- bin/rake coverage
+mise exec -C /home/pboling/src/kettle-rb/ast-merge/vendor/psych-merge -- bin/kettle-soup-cover -d
 ```
 
-**Key ENV variables** (set in `.envrc`, loaded via `direnv allow`):
+**Key ENV variables** (set in `mise.toml`, with local overrides in `.env.local`):
 - `K_SOUP_COV_DO=true` – Enable coverage
 - `K_SOUP_COV_MIN_LINE=100` – Line coverage threshold
 - `K_SOUP_COV_MIN_BRANCH=82` – Branch coverage threshold
@@ -238,7 +238,7 @@ it_behaves_like "a reproducible merge", "scenario_name", { preference: :template
 | `lib/psych/merge/mapping_entry.rb` | Key-value pair abstraction |
 | `lib/psych/merge/debug_logger.rb` | Psych-specific debug logging |
 | `spec/spec_helper.rb` | Test suite entry point |
-| `.envrc` | Coverage thresholds and environment configuration |
+| `mise.toml` | Shared development environment defaults |
 
 ## 🚀 Common Tasks
 
@@ -282,7 +282,8 @@ kettle-changelog && kettle-release
 3. **Do NOT forget nil checks**: YAML allows null values; handle them explicitly
 4. **Do NOT load vendor gems** – They are not part of this project; they do not exist in CI
 5. **Use `tmp/` for temporary files** – Never use `/tmp` or other system directories
-6. **Do NOT chain `cd` with `&&`** – Run `cd` as a separate command so `direnv` loads ENV
+6. **Do NOT expect `cd` to persist** – Every terminal command is isolated; use a self-contained `mise exec -C ... -- ...` invocation.
+7. **Do NOT rely on prior shell state** – Previous `cd`, `export`, aliases, and functions are not available to the next command.
 
 ## 🔧 YAML-Specific Notes
 
