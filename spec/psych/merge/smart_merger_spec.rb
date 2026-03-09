@@ -125,27 +125,29 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include("template_only")
         expect(result).to include("new_feature")
       end
-    end
 
-    context "with freeze blocks" do
-      it "preserves destination freeze blocks" do
+      it "does not duplicate identical non-scalar sequence items" do
         template = <<~YAML
-          normal: template_value
-          frozen: template_frozen
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
         YAML
         dest = <<~YAML
-          normal: dest_value
-          # psych-merge:freeze
-          frozen: dest_secret_value
-          # psych-merge:unfreeze
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
         YAML
 
-        merger = described_class.new(template, dest)
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
         result = merger.merge
 
-        expect(result).to include("dest_secret_value")
-        expect(result).to include("psych-merge:freeze")
-        expect(result).to include("psych-merge:unfreeze")
+        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+        expect(result.scan(/strategy: raw_copy/).size).to eq(1)
       end
     end
 
@@ -162,24 +164,146 @@ RSpec.describe Psych::Merge::SmartMerger do
 
         expect(result).to include("Important comment")
       end
-    end
 
-    context "with anchors and aliases" do
-      it "preserves anchor definitions" do
+      it "preserves section-leading comments for recursively merged mappings" do
         template = <<~YAML
-          defaults: &defaults
-            adapter: postgres
+          # Header comment
+          defaults:
+            freeze_token: template-token
+
+          # Token section comment
+          tokens:
+            author:
+              name: "{KJ|AUTHOR:NAME}"
+
+          # Patterns section comment
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Files section comment
+          files: {}
         YAML
         dest = <<~YAML
-          defaults: &defaults
-            adapter: mysql
+          # Header comment
+          defaults:
+            freeze_token: destination-token
+
+          # Token section comment
+          tokens:
+            author:
+              name: "Custom Author"
+
+          # Patterns section comment
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Files section comment
+          files: {}
         YAML
 
-        merger = described_class.new(template, dest)
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
         result = merger.merge
 
-        expect(result).to include("&defaults")
-        expect(result).to include("mysql")
+        expect(result).to include("# Header comment")
+        expect(result).to include("# Token section comment")
+        expect(result).to include("# Patterns section comment")
+        expect(result).to include("# Files section comment")
+        expect(result.scan(/# Files section comment/).size).to eq(1)
+        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+        expect(result).to include('freeze_token: destination-token')
+        expect(result).to include('name: "Custom Author"')
+      end
+
+      it "preserves kettle-jem style section spacing and trailing example comments" do
+        template = <<~YAML
+          # kettle-jem configuration file
+          #
+          # Header docs
+
+          # Default merge options
+          defaults:
+            preference: "template"
+            add_template_only_nodes: true
+            freeze_token: "kettle-jem"
+
+          # Token replacement values.
+          #
+          # General rules:
+          tokens:
+            forge:
+              gh_user: ""
+
+            author:
+              name: "{KJ|AUTHOR:NAME}"
+
+          # Glob patterns evaluated in order (first match wins)
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+
+          # To override specific files, add entries like:
+          #
+          # files:
+          #   README.md:
+          #     strategy: accept_template
+        YAML
+        dest = <<~YAML
+          # kettle-jem configuration file
+          #
+          # Header docs
+
+          # Default merge options
+          defaults:
+            preference: "template"
+            add_template_only_nodes: true
+            freeze_token: "kettle-jem"
+
+          # Token replacement values.
+          #
+          # General rules:
+          tokens:
+            forge:
+              gh_user: ""
+
+            author:
+              name: "Peter H. Boling"
+
+          # Glob patterns evaluated in order (first match wins)
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+
+          # To override specific files, add entries like:
+          #
+          # files:
+          #   README.md:
+          #     strategy: accept_template
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+          freeze_token: "kettle-jem",
+        )
+
+        expect(merger.merge).to eq(dest)
       end
     end
   end

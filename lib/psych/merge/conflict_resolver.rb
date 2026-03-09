@@ -81,6 +81,7 @@ module Psych
             template_nodes,
             dest_nodes,
             template_by_sig,
+            emit_destination_postlude: true,
           )
 
           # Transfer emitter output to result
@@ -137,9 +138,11 @@ module Psych
         end
       end
 
-      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)
+      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0, emit_destination_postlude: false)
         # Build reverse lookup from dest_node to template_node for refined matches
         refined_dest_to_template = @refined_matches.invert
+        next_template_by_id = build_next_node_lookup(template_nodes)
+        next_dest_by_id = build_next_node_lookup(dest_nodes)
 
         # Track consumed individual node indices (not just signatures) so that
         # multiple nodes sharing the same signature are matched 1:1 in order
@@ -155,6 +158,7 @@ module Psych
 
         # First pass: Process destination nodes and find matches
         dest_nodes.each do |dest_node|
+          next_dest_node = next_dest_by_id[dest_node.object_id]
           dest_sig = @dest_analysis.generate_signature(dest_node)
 
           # Preserve inter-node blank lines from destination
@@ -179,7 +183,10 @@ module Psych
           end
 
           # Update tracking for the current node's end line
-          if dest_node.respond_to?(:end_line) && dest_node.end_line
+          effective_dest_end_line = effective_end_line(dest_node, @dest_analysis, next_node: next_dest_node)
+          if effective_dest_end_line
+            prev_end_line = effective_dest_end_line
+          elsif dest_node.respond_to?(:end_line) && dest_node.end_line
             prev_end_line = dest_node.end_line
           end
 
@@ -212,7 +219,12 @@ module Psych
               if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
                 emit_recursive_merge(template_node, dest_node, depth: depth)
               else
-                emit_preferred_node(template_node, dest_node)
+                emit_preferred_node(
+                  template_node,
+                  dest_node,
+                  next_template_node: next_template_by_id[template_node.object_id],
+                  next_dest_node: next_dest_node,
+                )
               end
 
               consumed_template_indices << template_info[:index]
@@ -220,7 +232,7 @@ module Psych
             else
               # All template copies consumed — destination-only duplicate
               unless @remove_template_missing_nodes
-                emit_node(dest_node, @dest_analysis)
+                emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
               end
             end
           elsif refined_dest_to_template.key?(dest_node)
@@ -242,37 +254,52 @@ module Psych
             if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
               emit_recursive_merge(template_node, dest_node, depth: depth)
             else
-              emit_preferred_node(template_node, dest_node)
+              emit_preferred_node(
+                template_node,
+                dest_node,
+                next_template_node: next_template_by_id[template_node.object_id],
+                next_dest_node: next_dest_node,
+              )
             end
           else
             # Destination-only node
             # If remove_template_missing_nodes is enabled, skip this node (remove it)
             unless @remove_template_missing_nodes
-              emit_node(dest_node, @dest_analysis)
+              emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
           end
         end
 
+        emit_trailing_lines_after_last_node(dest_nodes.last, @dest_analysis) if emit_destination_postlude && dest_nodes.any?
+
         # Second pass: Add template-only nodes if configured
-        return unless @add_template_only_nodes
+        if @add_template_only_nodes
+          template_nodes.each_with_index do |template_node, idx|
+            # Skip if consumed by a match in the first pass
+            next if consumed_template_indices.include?(idx)
 
-        template_nodes.each_with_index do |template_node, idx|
-          # Skip if consumed by a match in the first pass
-          next if consumed_template_indices.include?(idx)
+            # Skip freeze blocks from template
+            next if freeze_node?(template_node)
 
-          # Skip freeze blocks from template
-          next if freeze_node?(template_node)
+            # Add template-only node
+            emit_node(
+              template_node,
+              @template_analysis,
+              next_node: next_template_by_id[template_node.object_id],
+            )
+          end
+        end
 
-          # Add template-only node
-          emit_node(template_node, @template_analysis)
+        if emit_destination_postlude && dest_nodes.empty? && @add_template_only_nodes && template_nodes.any?
+          emit_trailing_lines_after_last_node(template_nodes.last, @template_analysis)
         end
       end
 
-      def emit_preferred_node(template_node, dest_node)
+      def emit_preferred_node(template_node, dest_node, next_template_node: nil, next_dest_node: nil)
         if preference_for_pair(template_node, dest_node) == :destination
-          emit_node(dest_node, @dest_analysis)
+          emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
         else
-          emit_node(template_node, @template_analysis)
+          emit_node(template_node, @template_analysis, next_node: next_template_node)
         end
       end
 
@@ -312,7 +339,7 @@ module Psych
         return false unless template_node.respond_to?(:mapping?) && dest_node.respond_to?(:mapping?)
 
         if template_node.mapping? && dest_node.mapping?
-          true
+          !flow_mapping?(template_node) && !flow_mapping?(dest_node)
         elsif template_node.sequence? && dest_node.sequence?
           # Flow sequences (e.g., `key: [val1, val2]`) occupy the same physical
           # line as their key.  Recursing into them would emit the key line via
@@ -335,7 +362,23 @@ module Psych
         return false unless node.respond_to?(:key) && node.respond_to?(:value)
         return false unless node.key && node.value
 
-        node.key.start_line == node.value.start_line
+        key_start_line = node.key&.start_line
+        value_start_line = node.value&.start_line
+        return false unless key_start_line && value_start_line
+
+        key_start_line == value_start_line
+      end
+
+      def flow_mapping?(node)
+        return false unless node.respond_to?(:key) && node.respond_to?(:value)
+        return false unless node.key && node.value
+        return false unless node.value.respond_to?(:mapping?) && node.value.mapping?
+
+        key_start_line = node.key&.start_line
+        value_start_line = node.value&.start_line
+        return false unless key_start_line && value_start_line
+
+        key_start_line == value_start_line
       end
 
       # Emit a recursively merged node
@@ -344,10 +387,12 @@ module Psych
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with nested structure
       # @param depth [Integer] Current recursion depth
       def emit_recursive_merge(template_node, dest_node, depth:)
-        # Get the key line from destination (preserves formatting/comments)
-        # MappingEntry has a key attribute, NodeWrapper does not
+        # Preserve the destination prelude (leading comments / blank lines) for
+        # recursively merged mapping entries, then emit the raw key line.
         if dest_node.respond_to?(:key) && dest_node.key
-          key_line = @dest_analysis.line_at(dest_node.key.start_line)
+          emit_mapping_entry_prelude(dest_node, @dest_analysis)
+          key_start_line = dest_node.key&.start_line
+          key_line = key_start_line ? @dest_analysis.line_at(key_start_line) : nil
           @emitter.emit_raw_lines([key_line]) if key_line
         end
 
@@ -430,6 +475,7 @@ module Psych
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with sequence value
       # @param depth [Integer] Current recursion depth
       def emit_recursive_sequence_merge(template_node, dest_node, depth:)
+        _depth = depth
         # Get the sequence node:
         # - MappingEntry has .value which is a NodeWrapper wrapping the sequence
         # - NodeWrapper that IS a sequence should be used directly
@@ -452,8 +498,13 @@ module Psych
 
         # Build a set of destination scalar values for deduplication
         dest_values = ::Set.new
+        dest_item_fingerprints = ::Set.new
         dest_items.each do |item|
-          dest_values << item.value if item.scalar?
+          if item.scalar?
+            dest_values << item.value
+          else
+            dest_item_fingerprints << sequence_item_fingerprint(item, @dest_analysis)
+          end
         end
 
         # First, emit all destination items (unless remove_template_missing_nodes)
@@ -492,8 +543,9 @@ module Psych
               emit_sequence_item(item, @template_analysis)
             end
           else
-            # Non-scalar items: check by content/signature (simplified: always add)
-            # TODO: More sophisticated matching for nested objects in arrays
+            fingerprint = sequence_item_fingerprint(item, @template_analysis)
+            next if dest_item_fingerprints.include?(fingerprint)
+
             emit_sequence_item(item, @template_analysis)
           end
         end
@@ -505,19 +557,15 @@ module Psych
       # @param analysis [FileAnalysis] Analysis for accessing source
       def emit_sequence_item(item, analysis)
         if item.start_line && item.end_line
-          lines = []
-          (item.start_line..item.end_line).each do |line_num|
-            line = analysis.line_at(line_num)
-            lines << line if line
-          end
-          @emitter.emit_raw_lines(lines)
+          lines = trimmed_sequence_item_lines(item, analysis)
+          @emitter.emit_raw_lines(lines) if lines.any?
         end
       end
 
       # Emit a single node to the emitter
       # @param node [NodeWrapper, MappingEntry] Node to emit
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_node(node, analysis)
+      def emit_node(node, analysis, next_node: nil)
         return if freeze_node?(node)
 
         # Emit leading comments and any blank line separator before the node
@@ -539,12 +587,13 @@ module Psych
         # Emit the node content
         if node.is_a?(MappingEntry)
           # MappingEntry has specific format
-          emit_mapping_entry(node, analysis)
+          emit_mapping_entry(node, analysis, next_node: next_node)
         elsif node.respond_to?(:start_line) && node.respond_to?(:end_line)
           # Regular node - emit its lines
           if node.start_line && node.end_line
+            end_line = effective_end_line(node, analysis, next_node: next_node)
             lines = []
-            (node.start_line..node.end_line).each do |line_num|
+            (node.start_line..end_line).each do |line_num|
               line = analysis.line_at(line_num)
               lines << line if line
             end
@@ -556,12 +605,13 @@ module Psych
       # Emit a mapping entry
       # @param entry [MappingEntry] The mapping entry
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_mapping_entry(entry, analysis)
+      def emit_mapping_entry(entry, analysis, next_node: nil)
         # MappingEntry should have key and value
         # For now, emit as raw lines since we don't have full mapping entry structure
         if entry.respond_to?(:start_line) && entry.respond_to?(:end_line)
+          end_line = effective_end_line(entry, analysis, next_node: next_node)
           lines = []
-          (entry.start_line..entry.end_line).each do |line_num|
+          (entry.start_line..end_line).each do |line_num|
             line = analysis.line_at(line_num)
             lines << line if line
           end
@@ -573,6 +623,92 @@ module Psych
       # @param freeze_node [FreezeNode] Freeze block to emit
       def emit_freeze_block(freeze_node)
         @emitter.emit_raw_lines(freeze_node.lines)
+      end
+
+      def emit_mapping_entry_prelude(entry, analysis)
+        return unless entry.respond_to?(:start_line) && entry.start_line
+        return unless entry.respond_to?(:key) && entry.key&.start_line
+        return unless entry.start_line < entry.key.start_line
+
+        lines = []
+        (entry.start_line...entry.key.start_line).each do |line_num|
+          line = analysis.line_at(line_num)
+          lines << line if line
+        end
+        @emitter.emit_raw_lines(lines) if lines.any?
+      end
+
+      def sequence_item_fingerprint(item, analysis)
+        return [:scalar, item.value] if item.scalar?
+        return [:fallback, item.content] unless item.respond_to?(:start_line) && item.respond_to?(:end_line)
+        return [:fallback, item.content] unless item.start_line && item.end_line
+
+        [:raw_lines, trimmed_sequence_item_lines(item, analysis)]
+      end
+
+      def trimmed_sequence_item_lines(item, analysis)
+        lines = (item.start_line..item.end_line).map { |line_num| analysis.line_at(line_num) }.compact
+        return lines if lines.empty?
+
+        first_content_line = lines.find { |line| !line.strip.empty? }
+        return lines unless first_content_line
+
+        base_indent = first_content_line[/\A\s*/].to_s.length
+        cutoff_index = lines.index do |line|
+          next false if line.strip.empty?
+
+          indent = line[/\A\s*/].to_s.length
+          indent < base_indent
+        end
+
+        trimmed_lines = cutoff_index ? lines.take(cutoff_index) : lines
+        trimmed_lines.pop while trimmed_lines.any? && trimmed_lines.last.strip.empty?
+        trimmed_lines
+      end
+
+      def build_next_node_lookup(nodes)
+        lookup = {}
+
+        nodes.each_with_index do |node, idx|
+          lookup[node.object_id] = nodes[idx + 1]
+        end
+
+        lookup
+      end
+
+      def effective_end_line(node, analysis, next_node: nil)
+        return unless node.respond_to?(:end_line) && node.end_line
+
+        end_line = node.end_line
+        return end_line unless next_node.respond_to?(:start_line) && next_node.start_line
+
+        boundary = next_node.start_line - 1
+        if analysis.respond_to?(:comment_tracker)
+          boundary -= 1 while boundary >= 1 && analysis.comment_tracker.blank_line?(boundary)
+        end
+
+        [end_line, [boundary, node_content_start_line(node)].max].min
+      end
+
+      def emit_trailing_lines_after_last_node(node, analysis)
+        return unless node
+
+        after_line = effective_end_line(node, analysis)
+        return unless after_line && analysis.respond_to?(:lines)
+        return if after_line >= analysis.lines.length
+
+        lines = ((after_line + 1)..analysis.lines.length).map { |line_num| analysis.line_at(line_num) }.compact
+        @emitter.emit_raw_lines(lines) if lines.any?
+      end
+
+      def node_content_start_line(node)
+        if node.respond_to?(:key) && node.key&.start_line
+          node.key.start_line
+        elsif node.respond_to?(:start_line) && node.start_line
+          node.start_line
+        else
+          1
+        end
       end
     end
   end
