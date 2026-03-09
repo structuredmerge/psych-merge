@@ -240,6 +240,64 @@ RSpec.describe Psych::Merge::FileAnalysis do
     end
   end
 
+  describe "shared Ast::Merge comment accessors" do
+    let(:yaml) do
+      <<~YAML
+        # Header comment
+        defaults: # inline defaults
+          key: value
+
+        # Trailing comment
+      YAML
+    end
+
+    it "reports source-augmented comment capability" do
+      analysis = described_class.new(yaml)
+
+      expect(analysis.comment_capability).to be_a(Ast::Merge::Comment::Capability)
+      expect(analysis.comment_capability.source_augmented?).to be(true)
+    end
+
+    it "exposes comment nodes" do
+      analysis = described_class.new(yaml)
+
+      expect(analysis.comment_nodes.map(&:content)).to eq([
+        "Header comment",
+        "inline defaults",
+        "Trailing comment",
+      ])
+    end
+
+    it "returns a shared comment node at a line" do
+      analysis = described_class.new(yaml)
+
+      expect(analysis.comment_node_at(1)).to be_a(Ast::Merge::Comment::Line)
+      expect(analysis.comment_node_at(2)&.content).to eq("inline defaults")
+      expect(analysis.comment_node_at(3)).to be_nil
+    end
+
+    it "returns a shared comment region for a line range" do
+      analysis = described_class.new(yaml)
+      region = analysis.comment_region_for_range(1..2, kind: :leading)
+
+      expect(region).to be_a(Ast::Merge::Comment::Region)
+      expect(region.normalized_content).to eq("Header comment\ninline defaults")
+    end
+
+    it "builds a passive augmenter using default statement owners" do
+      analysis = described_class.new(yaml)
+      augmenter = analysis.comment_augmenter
+      attachment = augmenter.attachment_for(analysis.statements.first)
+
+      expect(augmenter).to be_a(Ast::Merge::Comment::Augmenter)
+      expect(attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(attachment.leading_region).to be_nil
+      expect(attachment.inline_region).not_to be_nil
+      expect(attachment.inline_region.normalized_content).to eq("inline defaults")
+      expect(augmenter.postlude_region).to be_nil
+    end
+  end
+
   describe "#root_mapping_entries" do
     it "returns mapping entries from root" do
       yaml = <<~YAML
@@ -515,6 +573,14 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(entry.inspect).to include("key")
     end
 
+    it "exposes a passive shared comment attachment" do
+      attachment = entry.comment_attachment
+
+      expect(attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(entry.leading_comment_region&.normalized_content).to eq("Leading comment")
+      expect(entry.inline_comment_region).to be_nil
+    end
+
     describe "#line_range" do
       it "returns nil when start_line is nil" do
         # Create an entry where the key has no line info
@@ -758,6 +824,50 @@ RSpec.describe Psych::Merge::FileAnalysis do
 
       expect(analysis.statements.length).to eq(1)
       expect(analysis.statements.first.scalar?).to be(true)
+    end
+  end
+
+  describe "shared Ast::Merge comment attachments on root owners" do
+    it "exposes a passive shared attachment on a root sequence node" do
+      yaml = <<~YAML
+        # Sequence header
+        - item1
+        - item2
+      YAML
+
+      analysis = described_class.new(yaml)
+      root = analysis.root_node
+
+      expect(root.comment_attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(root.leading_comment_region&.normalized_content).to eq("Sequence header")
+    end
+
+    it "delegates owner attachments through FileAnalysis" do
+      yaml = <<~YAML
+        # Root header
+        key: value
+      YAML
+
+      analysis = described_class.new(yaml)
+      attachment = analysis.comment_attachment_for(analysis.root_node, line_num: 2)
+
+      expect(attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(attachment.leading_region&.normalized_content).to eq("Root header")
+    end
+
+    it "infers a shared postlude region for trailing footer comments" do
+      yaml = <<~YAML
+        key: value
+
+        # Footer comment
+      YAML
+
+      analysis = described_class.new(yaml)
+      augmenter = analysis.comment_augmenter
+
+      expect(augmenter.postlude_region).to be_a(Ast::Merge::Comment::Region)
+      expect(augmenter.postlude_region.postlude?).to be(true)
+      expect(augmenter.postlude_region.normalized_content).to eq("Footer comment")
     end
   end
 end

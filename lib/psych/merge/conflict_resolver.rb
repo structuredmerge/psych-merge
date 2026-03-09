@@ -144,6 +144,8 @@ module Psych
         next_template_by_id = build_next_node_lookup(template_nodes)
         next_dest_by_id = build_next_node_lookup(dest_nodes)
 
+        emit_document_prelude(@dest_analysis, nodes: dest_nodes) if emit_destination_postlude
+
         # Track consumed individual node indices (not just signatures) so that
         # multiple nodes sharing the same signature are matched 1:1 in order
         # rather than collapsed into a single match.
@@ -163,12 +165,7 @@ module Psych
 
           # Preserve inter-node blank lines from destination
           if prev_end_line && dest_node.respond_to?(:start_line) && dest_node.start_line
-            # Determine the effective start line (before leading comments)
-            effective_start = dest_node.start_line
-            if @dest_analysis.respond_to?(:comment_tracker)
-              leading = @dest_analysis.comment_tracker.leading_comments_before(dest_node.start_line)
-              effective_start = leading.first[:line] if leading.any? && leading.first[:line]
-            end
+            effective_start = effective_start_line(dest_node, @dest_analysis)
 
             # Emit blank lines that existed between the previous node and this one
             gap_start = prev_end_line + 1
@@ -231,7 +228,9 @@ module Psych
               sig_cursor[dest_sig] = cursor + 1
             else
               # All template copies consumed — destination-only duplicate
-              unless @remove_template_missing_nodes
+              if @remove_template_missing_nodes
+                emit_removed_destination_node_comments(dest_node, @dest_analysis)
+              else
                 emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
               end
             end
@@ -264,13 +263,13 @@ module Psych
           else
             # Destination-only node
             # If remove_template_missing_nodes is enabled, skip this node (remove it)
-            unless @remove_template_missing_nodes
+            if @remove_template_missing_nodes
+              emit_removed_destination_node_comments(dest_node, @dest_analysis)
+            else
               emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
           end
         end
-
-        emit_trailing_lines_after_last_node(dest_nodes.last, @dest_analysis) if emit_destination_postlude && dest_nodes.any?
 
         # Second pass: Add template-only nodes if configured
         if @add_template_only_nodes
@@ -290,8 +289,11 @@ module Psych
           end
         end
 
-        if emit_destination_postlude && dest_nodes.empty? && @add_template_only_nodes && template_nodes.any?
-          emit_trailing_lines_after_last_node(template_nodes.last, @template_analysis)
+        if emit_destination_postlude
+          emit_document_postlude(
+            @dest_analysis,
+            fallback_node: dest_nodes.last,
+          )
         end
       end
 
@@ -299,7 +301,13 @@ module Psych
         if preference_for_pair(template_node, dest_node) == :destination
           emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
         else
-          emit_node(template_node, @template_analysis, next_node: next_template_node)
+          emit_node(
+            template_node,
+            @template_analysis,
+            next_node: next_template_node,
+            comment_source_node: dest_node,
+            comment_analysis: @dest_analysis,
+          )
         end
       end
 
@@ -388,12 +396,10 @@ module Psych
       # @param depth [Integer] Current recursion depth
       def emit_recursive_merge(template_node, dest_node, depth:)
         # Preserve the destination prelude (leading comments / blank lines) for
-        # recursively merged mapping entries, then emit the raw key line.
+        # recursively merged mapping entries, then emit the key line.
         if dest_node.respond_to?(:key) && dest_node.key
           emit_mapping_entry_prelude(dest_node, @dest_analysis)
-          key_start_line = dest_node.key&.start_line
-          key_line = key_start_line ? @dest_analysis.line_at(key_start_line) : nil
-          @emitter.emit_raw_lines([key_line]) if key_line
+          emit_mapping_entry_key_line(dest_node, @dest_analysis)
         end
 
         if template_node.mapping? && dest_node.mapping?
@@ -475,7 +481,6 @@ module Psych
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with sequence value
       # @param depth [Integer] Current recursion depth
       def emit_recursive_sequence_merge(template_node, dest_node, depth:)
-        _depth = depth
         # Get the sequence node:
         # - MappingEntry has .value which is a NodeWrapper wrapping the sequence
         # - NodeWrapper that IS a sequence should be used directly
@@ -496,39 +501,34 @@ module Psych
         template_items = template_value.sequence_items(comment_tracker: @template_analysis.comment_tracker)
         dest_items = dest_value.sequence_items(comment_tracker: @dest_analysis.comment_tracker)
 
-        # Build a set of destination scalar values for deduplication
-        dest_values = ::Set.new
-        dest_item_fingerprints = ::Set.new
+        template_items_by_key = build_sequence_item_match_map(template_items, @template_analysis)
+        consumed_template_indices = ::Set.new
+        key_cursor = Hash.new(0)
+
         dest_items.each do |item|
-          if item.scalar?
-            dest_values << item.value
-          else
-            dest_item_fingerprints << sequence_item_fingerprint(item, @dest_analysis)
-          end
-        end
+          match_key = sequence_item_match_key(item, @dest_analysis)
+          template_info = next_sequence_item_match(template_items_by_key, match_key, key_cursor, consumed_template_indices)
 
-        # First, emit all destination items (unless remove_template_missing_nodes)
-        if @remove_template_missing_nodes
-          # Only emit destination items that exist in template
-          template_values = ::Set.new
-          template_items.each do |item|
-            template_values << item.value if item.scalar?
-          end
+          if template_info
+            template_item = template_info[:item]
 
-          dest_items.each do |item|
-            if item.scalar?
-              # Only keep if exists in template
-              if template_values.include?(item.value)
-                emit_sequence_item(item, @dest_analysis)
-              end
-            else
-              # Non-scalar items: keep by default (complex matching not implemented)
+            if should_recurse?(depth) && can_merge_recursively?(template_item, item)
+              emit_recursive_merge(template_item, item, depth: depth)
+            elsif preference_for_pair(template_item, item) == :destination
               emit_sequence_item(item, @dest_analysis)
+            else
+              emit_sequence_item(
+                template_item,
+                @template_analysis,
+                comment_source_node: item,
+                comment_analysis: @dest_analysis,
+              )
             end
-          end
-        else
-          # Keep all destination items
-          dest_items.each do |item|
+
+            consumed_template_indices << template_info[:index]
+          elsif @remove_template_missing_nodes
+            emit_removed_sequence_item_comments(item, @dest_analysis, depth: depth)
+          else
             emit_sequence_item(item, @dest_analysis)
           end
         end
@@ -536,18 +536,10 @@ module Psych
         # If add_template_only_nodes, add template items not in destination
         return unless @add_template_only_nodes
 
-        template_items.each do |item|
-          if item.scalar?
-            # Only add if not already in destination
-            unless dest_values.include?(item.value)
-              emit_sequence_item(item, @template_analysis)
-            end
-          else
-            fingerprint = sequence_item_fingerprint(item, @template_analysis)
-            next if dest_item_fingerprints.include?(fingerprint)
+        template_items.each_with_index do |item, idx|
+          next if consumed_template_indices.include?(idx)
 
-            emit_sequence_item(item, @template_analysis)
-          end
+          emit_sequence_item(item, @template_analysis)
         end
       end
 
@@ -555,40 +547,39 @@ module Psych
       #
       # @param item [NodeWrapper] Sequence item to emit
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_sequence_item(item, analysis)
-        if item.start_line && item.end_line
-          lines = trimmed_sequence_item_lines(item, analysis)
-          @emitter.emit_raw_lines(lines) if lines.any?
-        end
+      def emit_sequence_item(item, analysis, comment_source_node: nil, comment_analysis: analysis)
+        return unless item.start_line && item.end_line
+
+        emit_node_prelude(item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+
+        lines = trimmed_sequence_item_lines(item, analysis)
+        return if lines.empty?
+
+        emit_node_first_line(lines.shift, item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+        @emitter.emit_raw_lines(lines) if lines.any?
       end
 
       # Emit a single node to the emitter
       # @param node [NodeWrapper, MappingEntry] Node to emit
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_node(node, analysis, next_node: nil)
+      def emit_node(node, analysis, next_node: nil, comment_source_node: nil, comment_analysis: analysis)
         return if freeze_node?(node)
 
-        # Emit leading comments and any blank line separator before the node
-        if node.respond_to?(:start_line) && node.start_line
-          leading = analysis.comment_tracker.leading_comments_before(node.start_line)
-          unless leading.empty?
-            leading.each do |comment|
-              @emitter.emit_tracked_comment(comment)
-            end
-            # Preserve blank line between comments and the node if one existed
-            last_comment_line = leading.last[:line]
-            if node.start_line - last_comment_line > 1 &&
-                analysis.comment_tracker.blank_line?(last_comment_line + 1)
-              @emitter.emit_blank_line
-            end
-          end
+        if node.is_a?(MappingEntry)
+          emit_mapping_entry(
+            node,
+            analysis,
+            next_node: next_node,
+            comment_source_node: comment_source_node,
+            comment_analysis: comment_analysis,
+          )
+          return
         end
 
+        emit_node_prelude(node, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+
         # Emit the node content
-        if node.is_a?(MappingEntry)
-          # MappingEntry has specific format
-          emit_mapping_entry(node, analysis, next_node: next_node)
-        elsif node.respond_to?(:start_line) && node.respond_to?(:end_line)
+        if node.respond_to?(:start_line) && node.respond_to?(:end_line)
           # Regular node - emit its lines
           if node.start_line && node.end_line
             end_line = effective_end_line(node, analysis, next_node: next_node)
@@ -597,7 +588,10 @@ module Psych
               line = analysis.line_at(line_num)
               lines << line if line
             end
-            @emitter.emit_raw_lines(lines)
+            unless lines.empty?
+              emit_node_first_line(lines.shift, node, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+              @emitter.emit_raw_lines(lines) if lines.any?
+            end
           end
         end
       end
@@ -605,18 +599,29 @@ module Psych
       # Emit a mapping entry
       # @param entry [MappingEntry] The mapping entry
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_mapping_entry(entry, analysis, next_node: nil)
-        # MappingEntry should have key and value
-        # For now, emit as raw lines since we don't have full mapping entry structure
-        if entry.respond_to?(:start_line) && entry.respond_to?(:end_line)
-          end_line = effective_end_line(entry, analysis, next_node: next_node)
-          lines = []
-          (entry.start_line..end_line).each do |line_num|
-            line = analysis.line_at(line_num)
-            lines << line if line
-          end
-          @emitter.emit_raw_lines(lines)
+      def emit_mapping_entry(entry, analysis, next_node: nil, comment_source_node: nil, comment_analysis: analysis)
+        return unless entry.respond_to?(:start_line) && entry.respond_to?(:end_line)
+
+        emit_mapping_entry_prelude(entry, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+
+        content_start_line = mapping_entry_content_start_line(entry)
+        end_line = effective_end_line(entry, analysis, next_node: next_node)
+        return unless content_start_line && end_line
+        return if end_line < content_start_line
+
+        if entry.respond_to?(:key) && entry.key&.start_line == content_start_line
+          emit_mapping_entry_key_line(entry, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+          content_start_line += 1
         end
+
+        return if content_start_line > end_line
+
+        lines = []
+        (content_start_line..end_line).each do |line_num|
+          line = analysis.line_at(line_num)
+          lines << line if line
+        end
+        @emitter.emit_raw_lines(lines) if lines.any?
       end
 
       # Emit a freeze block
@@ -625,17 +630,232 @@ module Psych
         @emitter.emit_raw_lines(freeze_node.lines)
       end
 
-      def emit_mapping_entry_prelude(entry, analysis)
+      def emit_mapping_entry_prelude(entry, analysis, comment_source_node: nil, comment_analysis: analysis)
+        content_start_line = mapping_entry_content_start_line(entry)
+        return unless content_start_line
+
+        leading_region = preferred_leading_comment_region(entry, comment_source_node)
+        if leading_region && !leading_region.empty?
+          source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
+          source_node = resolved_comment_node(entry, comment_source_node, leading_region)
+          source_content_start_line = node_content_start_line(source_node)
+
+          @emitter.emit_comment_region(leading_region, source_lines: source_analysis&.lines)
+          emit_interstitial_blank_lines(
+            (leading_region.end_line || source_content_start_line) + 1,
+            source_content_start_line - 1,
+            source_analysis,
+          ) if source_analysis && source_content_start_line
+          return
+        end
+
         return unless entry.respond_to?(:start_line) && entry.start_line
-        return unless entry.respond_to?(:key) && entry.key&.start_line
-        return unless entry.start_line < entry.key.start_line
+        return unless entry.start_line < content_start_line
 
         lines = []
-        (entry.start_line...entry.key.start_line).each do |line_num|
+        (entry.start_line...content_start_line).each do |line_num|
           line = analysis.line_at(line_num)
           lines << line if line
         end
         @emitter.emit_raw_lines(lines) if lines.any?
+      end
+
+      def emit_node_prelude(node, analysis, comment_source_node: nil, comment_analysis: analysis)
+        content_start_line = node_content_start_line(node)
+        return unless content_start_line
+
+        leading_region = preferred_leading_comment_region(node, comment_source_node)
+        if leading_region && !leading_region.empty?
+          source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
+          source_node = resolved_comment_node(node, comment_source_node, leading_region)
+          source_content_start_line = node_content_start_line(source_node)
+
+          @emitter.emit_comment_region(leading_region, source_lines: source_analysis&.lines)
+          emit_interstitial_blank_lines(
+            (leading_region.end_line || source_content_start_line) + 1,
+            source_content_start_line - 1,
+            source_analysis,
+          ) if source_analysis && source_content_start_line
+          return
+        end
+
+        return unless node.respond_to?(:start_line) && node.start_line
+        return unless analysis.respond_to?(:comment_tracker)
+
+        leading = analysis.comment_tracker.leading_comments_before(node.start_line)
+        unless leading.empty?
+          leading.each do |comment|
+            @emitter.emit_tracked_comment(comment)
+          end
+          # Preserve blank line between comments and the node if one existed
+          last_comment_line = leading.last[:line]
+          if node.start_line - last_comment_line > 1 &&
+              analysis.comment_tracker.blank_line?(last_comment_line + 1)
+            @emitter.emit_blank_line
+          end
+        end
+      end
+
+      def emit_mapping_entry_key_line(entry, analysis, comment_source_node: nil, comment_analysis: analysis)
+        return unless entry.respond_to?(:key) && entry.key&.start_line
+
+        key_line = analysis.line_at(entry.key.start_line)
+        return unless key_line
+
+        emit_node_first_line(key_line, entry, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
+      end
+
+      def emit_node_first_line(line, node, analysis, comment_source_node: nil, comment_analysis: analysis)
+        inline_region = preferred_inline_comment_region(node, comment_source_node)
+        unless inline_region && !inline_region.empty?
+          @emitter.emit_raw_lines([line])
+          return
+        end
+
+        existing_inline_region = node_inline_comment_region(node)
+        line = strip_inline_comment_from_line(line, existing_inline_region) if existing_inline_region && !existing_inline_region.empty?
+
+        @emitter.emit_raw_lines([line])
+        @emitter.emit_comment_region(
+          inline_region,
+          inline: true,
+          source_lines: resolved_comment_analysis(analysis, comment_source_node, comment_analysis, inline_region)&.lines,
+        )
+      end
+
+      def emit_removed_destination_node_comments(node, analysis)
+        leading_region = node_leading_comment_region(node)
+        content_start_line = node_content_start_line(node)
+        if leading_region && !leading_region.empty?
+          @emitter.emit_comment_region(leading_region, source_lines: analysis.lines)
+          emit_interstitial_blank_lines((leading_region.end_line || content_start_line) + 1, content_start_line - 1, analysis) if content_start_line
+        end
+
+        emit_removed_destination_node_inline_comments(node, analysis)
+      end
+
+      def emit_removed_destination_node_inline_comments(node, analysis)
+        inline_region = node_inline_comment_region(node)
+        return unless inline_region && !inline_region.empty?
+
+        tracked_hashes = Array(inline_region.metadata[:tracked_hashes])
+        if tracked_hashes.any?
+          tracked_hashes.each do |comment|
+            line_num = comment[:line] || comment["line"]
+            line = analysis.line_at(line_num)
+            indent = line.to_s[/\A\s*/].to_s.length
+            @emitter.emit_tracked_comment(comment.merge(indent: indent))
+          end
+        else
+          @emitter.emit_comment_region(inline_region, inline: false, source_lines: analysis.lines)
+        end
+      end
+
+      def emit_removed_sequence_item_comments(item, analysis, depth:)
+        if should_recurse?(depth) && item.mapping?
+          emit_removed_sequence_mapping_item_comments(item, analysis, depth: depth)
+        elsif should_recurse?(depth) && item.sequence?
+          emit_removed_nested_sequence_item_comments(item, analysis, depth: depth)
+        else
+          emit_removed_destination_node_comments(item, analysis)
+        end
+      end
+
+      def emit_removed_sequence_mapping_item_comments(item, analysis, depth:)
+        nested_entries = item.mapping_entries(comment_tracker: analysis.comment_tracker).map do |key_wrapper, value_wrapper|
+          MappingEntry.new(
+            key: key_wrapper,
+            value: value_wrapper,
+            lines: analysis.lines,
+            comment_tracker: analysis.comment_tracker,
+          )
+        end
+
+        merge_nodes_to_emitter([], nested_entries, {}, depth: depth + 1)
+      end
+
+      def build_sequence_item_match_map(items, analysis)
+        items.each_with_index.with_object({}) do |(item, idx), map|
+          match_key = sequence_item_match_key(item, analysis)
+          map[match_key] ||= []
+          map[match_key] << {item: item, index: idx}
+        end
+      end
+
+      def next_sequence_item_match(items_by_key, match_key, key_cursor, consumed_template_indices)
+        candidates = items_by_key[match_key]
+        return unless candidates
+
+        cursor = key_cursor[match_key]
+        template_info = nil
+
+        while cursor < candidates.size
+          candidate = candidates[cursor]
+          unless consumed_template_indices.include?(candidate[:index])
+            template_info = candidate
+            break
+          end
+          cursor += 1
+        end
+
+        key_cursor[match_key] = cursor + 1 if template_info
+        template_info
+      end
+
+      def sequence_item_match_key(item, analysis)
+        return [:scalar, item.value] if item.scalar?
+        return [:alias, item.alias_anchor] if item.alias?
+
+        nested_sequence_identity = sequence_nested_item_identity(item, analysis)
+        return nested_sequence_identity if nested_sequence_identity
+
+        mapping_identity = sequence_mapping_item_identity(item, analysis)
+        return mapping_identity if mapping_identity
+
+        [:fingerprint, sequence_item_fingerprint(item, analysis)]
+      end
+
+      def sequence_mapping_item_identity(item, analysis)
+        return unless item.mapping?
+
+        scalar_entries = item.mapping_entries(comment_tracker: analysis.comment_tracker).filter_map do |key_wrapper, value_wrapper|
+          next unless key_wrapper&.value && value_wrapper&.scalar?
+
+          [key_wrapper.value, value_wrapper.value]
+        end
+        return if scalar_entries.empty?
+
+        %w[id name key path file pattern].each do |identity_key|
+          pair = scalar_entries.find { |key, _value| key == identity_key }
+          next unless pair
+
+          stable_auxiliary_pairs = scalar_entries.reject do |key, _value|
+            key == identity_key || key == "value"
+          end.sort_by(&:first)
+
+          return [:mapping_scalar_identity, identity_key, pair[1], stable_auxiliary_pairs] if stable_auxiliary_pairs.any?
+
+          return [:mapping_scalar_identity, identity_key, pair[1]]
+        end
+
+        return [:mapping_scalar_identity, scalar_entries.first[0], scalar_entries.first[1]] if scalar_entries.one?
+
+        nil
+      end
+
+      def sequence_nested_item_identity(item, analysis)
+        return unless item.sequence?
+
+        nested_items = item.sequence_items(comment_tracker: analysis.comment_tracker)
+        return if nested_items.empty?
+
+        first_item = nested_items.first
+        [:nested_sequence_identity, sequence_item_match_key(first_item, analysis)]
+      end
+
+      def emit_removed_nested_sequence_item_comments(item, analysis, depth:)
+        nested_items = item.sequence_items(comment_tracker: analysis.comment_tracker)
+        merge_nodes_to_emitter([], nested_items, {}, depth: depth + 1)
       end
 
       def sequence_item_fingerprint(item, analysis)
@@ -680,7 +900,7 @@ module Psych
         return unless node.respond_to?(:end_line) && node.end_line
 
         end_line = node.end_line
-        return end_line unless next_node.respond_to?(:start_line) && next_node.start_line
+        return end_line unless next_node && next_node.respond_to?(:start_line) && next_node.start_line
 
         boundary = next_node.start_line - 1
         if analysis.respond_to?(:comment_tracker)
@@ -701,6 +921,56 @@ module Psych
         @emitter.emit_raw_lines(lines) if lines.any?
       end
 
+      def emit_document_postlude(analysis, fallback_node: nil)
+        augmenter = document_comment_augmenter_for(analysis)
+        postlude = augmenter&.postlude_region
+
+        if postlude && !postlude.empty?
+          if fallback_node && postlude.respond_to?(:start_line) && postlude.start_line
+            last_content_line = effective_end_line(fallback_node, analysis)
+            emit_interstitial_blank_lines(last_content_line + 1, postlude.start_line - 1, analysis) if last_content_line
+          end
+          @emitter.emit_comment_region(postlude, source_lines: analysis.lines)
+        else
+          emit_trailing_lines_after_last_node(fallback_node, analysis)
+        end
+      end
+
+      def emit_document_prelude(analysis, nodes: [])
+        augmenter = document_comment_augmenter_for(analysis)
+        return unless augmenter
+
+        normalized_nodes = Array(nodes)
+        regions = []
+        preamble = augmenter.preamble_region
+        regions << preamble if preamble && !preamble.empty?
+
+        if normalized_nodes.empty?
+          augmenter.orphan_regions.each do |region|
+            regions << region if region && !region.empty?
+          end
+        end
+
+        regions.each do |region|
+          @emitter.emit_comment_region(region, source_lines: analysis.lines)
+        end
+
+        return if regions.empty?
+
+        last_region_end = regions.last.end_line
+        if normalized_nodes.any?
+          first_node_start = effective_start_line(normalized_nodes.first, analysis)
+          emit_interstitial_blank_lines(last_region_end + 1, first_node_start - 1, analysis) if last_region_end && first_node_start
+        else
+          emit_interstitial_blank_lines(last_region_end + 1, analysis.lines.length, analysis) if last_region_end
+        end
+      end
+
+      def document_comment_augmenter_for(analysis)
+        @document_comment_augmenters ||= {}
+        @document_comment_augmenters[analysis.object_id] ||= analysis.comment_augmenter
+      end
+
       def node_content_start_line(node)
         if node.respond_to?(:key) && node.key&.start_line
           node.key.start_line
@@ -709,6 +979,95 @@ module Psych
         else
           1
         end
+      end
+
+      def effective_start_line(node, analysis)
+        return unless node
+
+        leading_region = node_leading_comment_region(node)
+        return leading_region.start_line if leading_region && leading_region.start_line
+        return node.start_line unless analysis.respond_to?(:comment_tracker) && node.respond_to?(:start_line) && node.start_line
+
+        leading = analysis.comment_tracker.leading_comments_before(node.start_line)
+        leading.any? && leading.first[:line] ? leading.first[:line] : node.start_line
+      end
+
+      def mapping_entry_content_start_line(entry)
+        return entry.key.start_line if entry.respond_to?(:key) && entry.key&.start_line
+        return entry.start_line if entry.respond_to?(:start_line)
+
+        nil
+      end
+
+      def node_leading_comment_region(node)
+        return unless node.respond_to?(:leading_comment_region)
+
+        node.leading_comment_region
+      end
+
+      def node_inline_comment_region(node)
+        return unless node.respond_to?(:inline_comment_region)
+
+        node.inline_comment_region
+      end
+
+      def preferred_leading_comment_region(node, comment_source_node = nil)
+        source_region = node_leading_comment_region(comment_source_node) if comment_source_node
+        return source_region if source_region && !source_region.empty?
+
+        node_leading_comment_region(node)
+      end
+
+      def preferred_inline_comment_region(node, comment_source_node = nil)
+        source_region = node_inline_comment_region(comment_source_node) if comment_source_node
+        return source_region if source_region && !source_region.empty?
+
+        node_inline_comment_region(node)
+      end
+
+      def resolved_comment_analysis(default_analysis, comment_source_node, comment_analysis, region)
+        return default_analysis unless comment_source_node && comment_analysis
+
+        source_leading = node_leading_comment_region(comment_source_node)
+        source_inline = node_inline_comment_region(comment_source_node)
+        return comment_analysis if source_leading.equal?(region) || source_inline.equal?(region)
+
+        default_analysis
+      end
+
+      def resolved_comment_node(default_node, comment_source_node, region)
+        return default_node unless comment_source_node
+
+        source_leading = node_leading_comment_region(comment_source_node)
+        source_inline = node_inline_comment_region(comment_source_node)
+        return comment_source_node if source_leading.equal?(region) || source_inline.equal?(region)
+
+        default_node
+      end
+
+      def emit_interstitial_blank_lines(start_line, end_line, analysis)
+        return unless analysis
+        return unless start_line && end_line && start_line <= end_line
+
+        lines = []
+        (start_line..end_line).each do |line_num|
+          line = analysis.line_at(line_num)
+          lines << line if line && line.strip.empty?
+        end
+        @emitter.emit_raw_lines(lines) if lines.any?
+      end
+
+      def strip_inline_comment_from_line(line, inline_region)
+        tracked_hash = inline_region.metadata[:tracked_hashes]&.first
+        indent = tracked_hash && (tracked_hash[:indent] || tracked_hash["indent"])
+
+        stripped = if indent
+          line[0...indent].to_s.rstrip
+        else
+          line.sub(/\s+#.*\z/, "")
+        end
+
+        stripped.empty? ? line : stripped
       end
     end
   end

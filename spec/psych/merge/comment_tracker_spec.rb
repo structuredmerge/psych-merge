@@ -65,6 +65,80 @@ RSpec.describe Psych::Merge::CommentTracker do
     end
   end
 
+  describe "shared Ast::Merge comment accessors" do
+    it "exposes comment nodes using the shared Ast::Merge comment model" do
+      source = <<~YAML
+        # Header comment
+        key: value # inline note
+      YAML
+
+      tracker = described_class.new(source)
+      nodes = tracker.comment_nodes
+
+      expect(nodes.length).to eq(2)
+      expect(nodes).to all(be_a(Ast::Merge::Comment::Line))
+      expect(nodes.map(&:content)).to eq(["Header comment", "inline note"])
+    end
+
+    it "returns a shared comment node at a line" do
+      source = <<~YAML
+        # Header comment
+        key: value
+      YAML
+
+      tracker = described_class.new(source)
+      node = tracker.comment_node_at(1)
+
+      expect(node).not_to be_nil
+      expect(node).to be_a(Ast::Merge::Comment::Line)
+      expect(node&.content).to eq("Header comment")
+      expect(tracker.comment_node_at(2)).to be_nil
+    end
+
+    it "returns a shared comment region for a range" do
+      source = <<~YAML
+        # First
+        # Second
+        key: value # inline note
+      YAML
+
+      tracker = described_class.new(source)
+      region = tracker.comment_region_for_range(1..3, kind: :leading)
+
+      expect(region).to be_a(Ast::Merge::Comment::Region)
+      expect(region.leading?).to be(true)
+      expect(region.normalized_content).to eq("First\nSecond\ninline note")
+      expect(region.metadata[:source]).to eq(:tracked_hash)
+    end
+
+    it "can filter a shared region to full-line comments only" do
+      source = <<~YAML
+        # First
+        key: value # inline note
+      YAML
+
+      tracker = described_class.new(source)
+      region = tracker.comment_region_for_range(1..2, kind: :leading, full_line_only: true)
+
+      expect(region.normalized_content).to eq("First")
+    end
+
+    it "builds a shared passive augmenter" do
+      source = <<~YAML
+        # Header comment
+        key: value
+      YAML
+
+      owner = Struct.new(:start_line, :end_line, keyword_init: true).new(start_line: 2, end_line: 2)
+      tracker = described_class.new(source)
+      augmenter = tracker.augment(owners: [owner])
+
+      expect(augmenter).to be_a(Ast::Merge::Comment::Augmenter)
+      expect(augmenter.capability).to be_source_augmented
+      expect(augmenter.attachment_for(owner).leading_region.normalized_content).to eq("Header comment")
+    end
+  end
+
   describe "#comments_in_range" do
     it "returns all comments in range" do
       source = <<~YAML

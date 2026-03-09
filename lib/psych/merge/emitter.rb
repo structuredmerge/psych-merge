@@ -29,6 +29,42 @@ module Psych
         @lines << "#{indent}# #{comment[:text]}"
       end
 
+      # Emit a shared Ast::Merge comment region.
+      #
+      # @param region [Ast::Merge::Comment::Region, nil] Comment region to emit
+      # @param inline [Boolean, nil] Force inline emission mode
+      # @param source_lines [Array<String>, nil] Source lines for preserving blank gaps
+      def emit_comment_region(region, inline: nil, source_lines: nil)
+        return unless region
+        return unless region.respond_to?(:nodes)
+        return if region.respond_to?(:empty?) && region.empty?
+
+        inline = region.inline? if inline.nil? && region.respond_to?(:inline?)
+        return emit_inline_comment_region(region) if inline
+
+        previous_line = nil
+        region.nodes.each do |node|
+          current_line = comment_region_line_number(node)
+          emit_region_gap_lines(previous_line, current_line, source_lines)
+          emit_comment_node(node)
+          previous_line = current_line
+        end
+      end
+
+      # Emit selected regions from a shared comment attachment.
+      #
+      # @param attachment [Ast::Merge::Comment::Attachment, nil] Attachment to emit
+      # @param leading [Boolean] Whether to emit the leading region
+      # @param inline [Boolean] Whether to emit the inline region
+      # @param source_lines [Array<String>, nil] Source lines for preserving blank gaps
+      def emit_comment_attachment(attachment, leading: true, inline: false, source_lines: nil)
+        return unless attachment
+        return unless attachment.respond_to?(:leading_region) && attachment.respond_to?(:inline_region)
+
+        emit_comment_region(attachment.leading_region, source_lines: source_lines) if leading && attachment.leading_region
+        emit_comment_region(attachment.inline_region, inline: true, source_lines: source_lines) if inline && attachment.inline_region
+      end
+
       # Emit a comment line
       #
       # @param text [String] Comment text (without #)
@@ -122,6 +158,47 @@ module Psych
       end
 
       private
+
+      def emit_inline_comment_region(region)
+        text = region.nodes.filter_map do |node|
+          if node.respond_to?(:normalized_content)
+            node.normalized_content
+          else
+            node.to_s
+          end
+        end.join(" ").strip
+
+        emit_comment(text, inline: true) unless text.empty?
+      end
+
+      def emit_comment_node(node)
+        if node.respond_to?(:slice)
+          @lines << node.slice.to_s.chomp
+        elsif node.respond_to?(:text)
+          @lines << node.text.to_s.chomp
+        else
+          emit_comment(node.respond_to?(:normalized_content) ? node.normalized_content : node.to_s)
+        end
+      end
+
+      def emit_region_gap_lines(previous_line, current_line, source_lines)
+        return unless previous_line && current_line && current_line > previous_line + 1
+
+        if source_lines
+          gap_lines = source_lines[previous_line, current_line - previous_line - 1] || []
+          blank_lines = gap_lines.select { |line| line.to_s.strip.empty? }
+          emit_raw_lines(blank_lines) if blank_lines.any?
+        else
+          (current_line - previous_line - 1).times { emit_blank_line }
+        end
+      end
+
+      def comment_region_line_number(node)
+        return node.line_number if node.respond_to?(:line_number)
+        return node.location.start_line if node.respond_to?(:location) && node.location
+
+        nil
+      end
 
       def format_scalar(value, style)
         case style

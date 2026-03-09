@@ -41,6 +41,58 @@ RSpec.describe Psych::Merge::NodeWrapper do
       expect(wrapper.start_line).to be_nil
       expect(wrapper.end_line).to be_nil
     end
+
+    it "accepts a comment tracker" do
+      ast = Psych.parse_stream(simple_yaml)
+      doc = ast.children.first
+      root = doc.children.first
+      tracker = Psych::Merge::CommentTracker.new("# comment\nkey: value\n")
+
+      wrapper = described_class.new(root, lines: lines, comment_tracker: tracker)
+
+      expect(wrapper.comment_tracker).to eq(tracker)
+    end
+  end
+
+  describe "shared Ast::Merge comment attachments" do
+    it "builds a passive attachment from raw wrapper comments" do
+      ast = Psych.parse_stream(simple_yaml)
+      doc = ast.children.first
+      root = doc.children.first
+      leading = [{line: 1, indent: 0, text: "Header", full_line: true, raw: "# Header"}]
+      inline = {line: 2, indent: 11, text: "inline note", full_line: false, raw: "key: value # inline note"}
+
+      wrapper = described_class.new(
+        root,
+        lines: ["# Header", "key: value # inline note"],
+        leading_comments: leading,
+        inline_comment: inline,
+      )
+
+      attachment = wrapper.comment_attachment
+
+      expect(attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(wrapper.leading_comment_region&.normalized_content).to eq("Header")
+      expect(wrapper.inline_comment_region&.normalized_content).to eq("inline note")
+    end
+
+    it "uses the comment tracker when available" do
+      yaml = <<~YAML
+        # Header
+        key: value # inline note
+      YAML
+      ast = Psych.parse_stream(yaml)
+      doc = ast.children.first
+      root = doc.children.first
+      value_node = root.children[1]
+      tracker = Psych::Merge::CommentTracker.new(yaml)
+
+      wrapper = described_class.new(value_node, lines: yaml.lines.map(&:chomp), comment_tracker: tracker)
+      attachment = wrapper.comment_attachment
+
+      expect(attachment).to be_a(Ast::Merge::Comment::Attachment)
+      expect(attachment.inline_region&.normalized_content).to eq("inline note")
+    end
   end
 
   describe "#signature" do
@@ -394,6 +446,25 @@ RSpec.describe Psych::Merge::NodeWrapper do
 
       wrapper = described_class.new(root, lines: lines)
       expect(wrapper.sequence_items).to be_empty
+    end
+
+    it "preserves comment attachments on wrapped sequence items" do
+      yaml = <<~YAML
+        # Sequence comment
+        - item1 # inline note
+      YAML
+
+      tracker = Psych::Merge::CommentTracker.new(yaml)
+      ast = Psych.parse_stream(yaml)
+      doc = ast.children.first
+      root = doc.children.first
+
+      wrapper = described_class.new(root, lines: yaml.lines.map(&:chomp), comment_tracker: tracker)
+      item = wrapper.sequence_items(comment_tracker: tracker).first
+
+      expect(item.comment_tracker).to eq(tracker)
+      expect(item.leading_comment_region&.normalized_content).to eq("Sequence comment")
+      expect(item.inline_comment_region&.normalized_content).to eq("inline note")
     end
   end
 

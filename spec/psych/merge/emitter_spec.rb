@@ -51,6 +51,62 @@ RSpec.describe Psych::Merge::Emitter do
     end
   end
 
+  describe "#emit_comment_region" do
+    it "emits shared leading regions and preserves blank gaps between comment lines" do
+      emitter = described_class.new
+      region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :leading,
+        comments: [
+          {line: 1, indent: 0, text: "First", full_line: true, raw: "# First"},
+          {line: 3, indent: 0, text: "Second", full_line: true, raw: "# Second"},
+        ],
+      )
+
+      emitter.emit_comment_region(region, source_lines: ["# First", "", "# Second"])
+
+      expect(emitter.lines).to eq(["# First", "", "# Second"])
+    end
+
+    it "appends shared inline regions to the current line" do
+      emitter = described_class.new
+      region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :inline,
+        comments: [
+          {line: 1, indent: 11, text: "inline note", full_line: false, raw: "key: value # inline note"},
+        ],
+      )
+
+      emitter.emit_raw_lines(["key: value"])
+      emitter.emit_comment_region(region, inline: true)
+
+      expect(emitter.lines).to eq(["key: value # inline note"])
+    end
+  end
+
+  describe "#emit_comment_attachment" do
+    it "emits selected regions from a shared attachment" do
+      emitter = described_class.new
+      leading_region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :leading,
+        comments: [{line: 1, indent: 0, text: "Header", full_line: true, raw: "# Header"}],
+      )
+      inline_region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :inline,
+        comments: [{line: 2, indent: 11, text: "inline", full_line: false, raw: "key: value # inline"}],
+      )
+      attachment = Ast::Merge::Comment::Attachment.new(
+        leading_region: leading_region,
+        inline_region: inline_region,
+      )
+
+      emitter.emit_comment_attachment(attachment, leading: true, source_lines: ["# Header"])
+      emitter.emit_raw_lines(["key: value"])
+      emitter.emit_comment_attachment(attachment, leading: false, inline: true)
+
+      expect(emitter.lines).to eq(["# Header", "key: value # inline"])
+    end
+  end
+
   describe "#emit_blank_line" do
     it "adds an empty line" do
       emitter = described_class.new

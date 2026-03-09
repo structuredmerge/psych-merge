@@ -391,7 +391,154 @@ RSpec.describe Psych::Merge::ConflictResolver do
         yaml = result.to_yaml
 
         expect(yaml).to include("Template comment")
+        expect(yaml.scan("Template comment").count).to eq(1)
         expect(yaml).to include("template_value")
+      end
+
+      it "preserves destination leading and inline comments when template content wins" do
+        template = <<~YAML
+          # Template comment
+          key: template_value # template inline
+        YAML
+        dest = <<~YAML
+          # Destination comment
+          key: dest_value # destination inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Destination comment")
+        expect(yaml).to include("key: template_value # destination inline")
+        expect(yaml).not_to include("# Template comment")
+        expect(yaml).not_to include("template inline")
+      end
+
+      it "preserves blank-line-separated destination comment blocks for nested matched mapping entries" do
+        template = <<~YAML
+          parent:
+            child: template_value
+        YAML
+        dest = <<~YAML
+          parent:
+            # Destination child docs
+            # More child docs
+
+            child: dest_value
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to match(/parent:\n  # Destination child docs\n  # More child docs\n\n  child: template_value\n\z/)
+      end
+    end
+
+    context "with destination preference and leading comments" do
+      it "does not duplicate mapping-entry leading comments" do
+        template = <<~YAML
+          key: template_value
+        YAML
+        dest = <<~YAML
+          # Destination comment
+          key: dest_value
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(template_analysis, dest_analysis)
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("Destination comment")
+        expect(yaml.scan("Destination comment").count).to eq(1)
+        expect(yaml).to include("key: dest_value")
+      end
+
+      it "keeps destination footer comments at the true end after template-only additions" do
+        template = <<~YAML
+          key: template_value
+          template_only: added
+        YAML
+        dest = <<~YAML
+          key: dest_value
+
+          # Destination footer
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("template_only: added")
+        expect(yaml).to include("# Destination footer")
+        expect(yaml.index("template_only: added")).to be < yaml.index("# Destination footer")
+        expect(yaml.scan("Destination footer").count).to eq(1)
+      end
+    end
+
+    context "with recursive merge and inline key comments" do
+      it "replays the destination inline comment through the shared attachment path" do
+        template = <<~YAML
+          defaults:
+            timeout: 30
+            retries: 2
+        YAML
+        dest = <<~YAML
+          defaults: # keep this note
+            timeout: 15
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("defaults: # keep this note")
+        expect(yaml.scan("keep this note").count).to eq(1)
+        expect(yaml).to include("timeout: 15")
+        expect(yaml).to include("retries: 2")
       end
     end
 
@@ -462,6 +609,94 @@ RSpec.describe Psych::Merge::ConflictResolver do
         # Should keep the dest-only node even without signature
         expect(yaml).to include("no_sig")
         expect(yaml).to include("dest_value")
+      end
+    end
+
+    context "with remove_template_missing_nodes and destination-only node comments" do
+      it "preserves leading comments for removed destination nodes" do
+        template = <<~YAML
+          keep: template_value
+        YAML
+        dest = <<~YAML
+          keep: dest_value
+
+          # Removed node comment
+          remove_me: old_value
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("keep: dest_value")
+        expect(yaml).to include("# Removed node comment")
+        expect(yaml).not_to include("remove_me: old_value")
+      end
+
+      it "promotes inline comments for removed destination nodes into standalone comments" do
+        template = <<~YAML
+          keep: template_value
+        YAML
+        dest = <<~YAML
+          keep: dest_value
+          remove_me: old_value # Removed node inline comment
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("keep: dest_value")
+        expect(yaml).to include("# Removed node inline comment")
+        expect(yaml).not_to include("remove_me: old_value")
+      end
+
+      it "preserves both leading and inline comments for removed destination nodes" do
+        template = <<~YAML
+          keep: template_value
+        YAML
+        dest = <<~YAML
+          keep: dest_value
+
+          # Removed node comment
+          remove_me: old_value # Removed node inline comment
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("keep: dest_value")
+        expect(yaml).to include("# Removed node comment")
+        expect(yaml).to include("# Removed node inline comment")
+        expect(yaml).not_to include("remove_me: old_value")
       end
     end
 
@@ -702,6 +937,699 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(output).to include("node_modules/**/*")
         # Template-only item added
         expect(output).to include("tmp/**/*")
+      end
+
+      it "preserves recursive sequence item leading and inline comments via shared attachments" do
+        template = <<~YAML
+          items:
+            - shared
+            # Template extra comment
+            - template_extra # template inline
+        YAML
+        dest = <<~YAML
+          items:
+            # Destination shared comment
+            - shared # keep this inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("# Destination shared comment")
+        expect(output.scan("Destination shared comment").count).to eq(1)
+        expect(output).to include("- shared # keep this inline")
+        expect(output.scan("keep this inline").count).to eq(1)
+        expect(output).to include("# Template extra comment")
+        expect(output).to include("- template_extra # template inline")
+      end
+
+      it "preserves leading comments for removed destination sequence items" do
+        template = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+        YAML
+        dest = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+              # Removed sequence item comment
+              - remove_this/**/*
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          recursive: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("keep_this/**/*")
+        expect(output).to include("# Removed sequence item comment")
+        expect(output).not_to include("remove_this/**/*")
+      end
+
+      it "promotes inline comments for removed destination sequence items into standalone comments" do
+        template = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+        YAML
+        dest = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+              - remove_this/**/* # Removed sequence item inline comment
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          recursive: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("keep_this/**/*")
+        expect(output).to include("# Removed sequence item inline comment")
+        expect(output).not_to include("remove_this/**/*")
+      end
+
+      it "preserves both leading and inline comments for removed destination sequence items" do
+        template = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+        YAML
+        dest = <<~YAML
+          AllCops:
+            Exclude:
+              - keep_this/**/*
+              # Removed sequence item comment
+              - remove_this/**/* # Removed sequence item inline comment
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          recursive: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("keep_this/**/*")
+        expect(output).to include("# Removed sequence item comment")
+        expect(output).to include("# Removed sequence item inline comment")
+        expect(output).not_to include("remove_this/**/*")
+      end
+    end
+
+    context "with comment variation matrix" do
+      it "preserves deeper nested destination comment blocks when template content wins" do
+        template = <<~YAML
+          root:
+            parent:
+              child:
+                grandchild: template_value
+        YAML
+        dest = <<~YAML
+          root:
+            parent:
+              child:
+                # Destination grandchild docs
+                # More destination docs
+
+                grandchild: dest_value
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to match(/root:\n  parent:\n    child:\n      # Destination grandchild docs\n      # More destination docs\n\n      grandchild: template_value\n\z/)
+      end
+
+      it "preserves matched nested comments while promoting removed nested sibling comments" do
+        template = <<~YAML
+          settings:
+            keep: template_value
+        YAML
+        dest = <<~YAML
+          settings:
+            # Keep docs
+            keep: dest_value # keep inline
+
+            # Remove docs
+            remove_me: old_value # remove inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep docs")
+        expect(yaml).to include("keep: template_value # keep inline")
+        expect(yaml).to include("# Remove docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).not_to include("remove_me: old_value")
+      end
+
+      it "handles commented flow and block hybrids in the same document" do
+        template = <<~YAML
+          funding:
+            github: [template_user]
+            ko_fi: pboling
+          AllCops:
+            Exclude:
+              - vendor/**/*
+              - tmp/**/*
+        YAML
+        dest = <<~YAML
+          funding:
+            # Funding docs
+            github: [dest_user] # github note
+            ko_fi: pboling
+          AllCops:
+            Exclude:
+              # Destination exclude docs
+              - vendor/**/* # keep vendor note
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Funding docs")
+        expect(yaml).to include("github: [template_user] # github note")
+        expect(yaml.scan("github:").count).to eq(1)
+        expect(yaml).to include("# Destination exclude docs")
+        expect(yaml).to include("- vendor/**/* # keep vendor note")
+        expect(yaml).to include("- tmp/**/*")
+      end
+
+      it "preserves surviving sequence item comments while promoting removed sibling item comments" do
+        template = <<~YAML
+          items:
+            - keep
+        YAML
+        dest = <<~YAML
+          items:
+            # Keep docs
+            - keep # keep inline
+
+            # Remove docs
+            - remove # remove inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          recursive: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep docs")
+        expect(yaml).to include("- keep # keep inline")
+        expect(yaml).to include("# Remove docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).not_to include("- remove # remove inline")
+      end
+
+      it "recursively matches sequence items that are mappings while removing destination-only siblings" do
+        template = <<~YAML
+          items:
+            - name: keep
+              value: template_value
+            - name: added
+              value: template_added
+        YAML
+        dest = <<~YAML
+          items:
+            # Keep item docs
+            - name: keep
+              value: dest_value # keep inline
+
+            # Remove item docs
+            - name: remove
+              value: old_value # remove inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep item docs")
+        expect(yaml).to include("value: template_value # keep inline")
+        expect(yaml).to include("# Remove item docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).to include("- name: added")
+        expect(yaml).to include("value: template_added")
+        expect(yaml).not_to include("- name: remove")
+        expect(yaml.scan(/- name: keep/).size).to eq(1)
+      end
+
+      it "recursively matches outer sequence items that are nested sequences while removing destination-only siblings" do
+        template = <<~YAML
+          groups:
+            # Keep group docs
+            - - keep
+              - template_inner
+            - - added
+              - template_added
+        YAML
+        dest = <<~YAML
+          groups:
+            # Keep group docs
+            - - keep # keep inline
+              - dest_inner
+
+            # Remove group docs
+            - - remove
+              - dest_removed # remove inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml.scan(/# Keep group docs/).size).to eq(1)
+        expect(yaml).to include("- - keep # keep inline")
+        expect(yaml).to include("- template_inner")
+        expect(yaml).to include("# Remove group docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).to include("- - added")
+        expect(yaml).to include("- template_added")
+        expect(yaml).not_to include("- - remove")
+      end
+
+      it "preserves blank-line-separated nested mapping comments inside matched sequence items without spilling to siblings" do
+        template = <<~YAML
+          items:
+            - name: keep
+              config:
+                keep: template_value
+                add: template_added
+            - name: untouched
+              config:
+                stable: template_stable
+        YAML
+        dest = <<~YAML
+          items:
+            - name: keep
+              config:
+                # Keep docs
+                keep: dest_value # keep inline
+
+                # Shared section docs
+                # More shared docs
+
+                # Remove docs
+                remove: old_value # remove inline
+            - name: untouched
+              config:
+                stable: dest_stable
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep docs")
+        expect(yaml).to include("keep: template_value # keep inline")
+        expect(yaml).to match(/# Shared section docs\n      # More shared docs\n\n      # Remove docs/)
+        expect(yaml).to include("# remove inline")
+        expect(yaml).to include("add: template_added")
+        expect(yaml).to include("- name: untouched")
+        expect(yaml).to include("stable: template_stable")
+        expect(yaml.scan(/# Shared section docs/).size).to eq(1)
+        expect(yaml).not_to include("remove: old_value")
+      end
+
+      it "preserves nested sequence comments inside matched sequence-item mappings without spilling to siblings" do
+        template = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - keep_rule
+                  - add_rule
+            - name: untouched
+              config:
+                stable: template_stable
+        YAML
+        dest = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  # Keep docs
+                  - keep_rule # keep inline
+
+                  # Shared section docs
+                  # More shared docs
+
+                  # Remove docs
+                  - remove_rule # remove inline
+            - name: untouched
+              config:
+                stable: dest_stable
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep docs")
+        expect(yaml).to include("- keep_rule # keep inline")
+        expect(yaml).to include("# Shared section docs")
+        expect(yaml).to include("# More shared docs")
+        expect(yaml).to include("# Remove docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).to include("- add_rule")
+        expect(yaml).to include("- name: untouched")
+        expect(yaml).to include("stable: template_stable")
+        expect(yaml.scan(/# Shared section docs/).size).to eq(1)
+        expect(yaml).not_to include("- remove_rule")
+        expect(yaml).to match(/# More shared docs\n\n        # Remove docs/)
+      end
+
+      it "preserves nested mapping-sequence comments inside matched sequence-item mappings without sibling spillover" do
+        template = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - id: keep
+                    value: template_value
+                  - id: add
+                    value: template_added
+            - name: untouched
+              config:
+                stable: template_stable
+        YAML
+        dest = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  # Keep rule docs
+                  - id: keep
+                    value: dest_value # keep inline
+
+                  # Shared rule docs
+                  # More shared rule docs
+
+                  # Remove rule docs
+                  - id: remove
+                    value: old_value # remove inline
+            - name: untouched
+              config:
+                stable: dest_stable
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("# Keep rule docs")
+        expect(yaml).to include("- id: keep")
+        expect(yaml).to include("value: template_value # keep inline")
+        expect(yaml).to include("# Shared rule docs")
+        expect(yaml).to include("# More shared rule docs")
+        expect(yaml).to include("# Remove rule docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml).to include("- id: add")
+        expect(yaml).to include("value: template_added")
+        expect(yaml).to include("- name: untouched")
+        expect(yaml).to include("stable: template_stable")
+        expect(yaml.scan(/# Shared rule docs/).size).to eq(1)
+        expect(yaml).not_to include("- id: remove")
+        expect(yaml).to match(/# More shared rule docs\n\n        # Remove rule docs/)
+      end
+
+      it "keeps destination order for matched inner mapping items while appending template-only additions" do
+        template = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - id: alpha
+                    value: template_alpha
+                  - id: beta
+                    value: template_beta
+                  - id: add
+                    value: template_add
+        YAML
+        dest = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - id: beta
+                    value: dest_beta # beta inline
+
+                  # Removed rule docs
+                  - id: remove
+                    value: dest_remove # remove inline
+
+                  - id: alpha
+                    value: dest_alpha # alpha inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        beta_index = yaml.index("- id: beta")
+        alpha_index = yaml.index("- id: alpha")
+        add_index = yaml.index("- id: add")
+
+        expect(beta_index).not_to be_nil
+        expect(alpha_index).not_to be_nil
+        expect(add_index).not_to be_nil
+        expect(beta_index).to be < alpha_index
+        expect(alpha_index).to be < add_index
+        expect(yaml).to include("value: template_beta # beta inline")
+        expect(yaml).to include("value: template_alpha # alpha inline")
+        expect(yaml).to include("# Removed rule docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml.scan(/- id: alpha/).size).to eq(1)
+        expect(yaml.scan(/- id: beta/).size).to eq(1)
+        expect(yaml.scan(/- id: add/).size).to eq(1)
+        expect(yaml).not_to include("- id: remove")
+      end
+
+      it "matches duplicate inner ids 1:1 using stable secondary discriminators" do
+        template = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - id: alpha
+                    scope: first
+                    value: template_first
+                  - id: alpha
+                    scope: second
+                    value: template_second
+                  - id: alpha
+                    scope: add
+                    value: template_add
+        YAML
+        dest = <<~YAML
+          items:
+            - name: keep
+              config:
+                rules:
+                  - id: alpha
+                    scope: second
+                    value: dest_second # second inline
+
+                  # Removed duplicate docs
+                  - id: alpha
+                    scope: remove
+                    value: dest_remove # remove inline
+
+                  - id: alpha
+                    scope: first
+                    value: dest_first # first inline
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+          remove_template_missing_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        second_index = yaml.index("scope: second")
+        first_index = yaml.index("scope: first")
+        add_index = yaml.index("scope: add")
+
+        expect(second_index).not_to be_nil
+        expect(first_index).not_to be_nil
+        expect(add_index).not_to be_nil
+        expect(second_index).to be < first_index
+        expect(first_index).to be < add_index
+        expect(yaml).to include("value: template_second # second inline")
+        expect(yaml).to include("value: template_first # first inline")
+        expect(yaml).to include("# Removed duplicate docs")
+        expect(yaml).to include("# remove inline")
+        expect(yaml.scan(/scope: first/).size).to eq(1)
+        expect(yaml.scan(/scope: second/).size).to eq(1)
+        expect(yaml.scan(/scope: add/).size).to eq(1)
+        expect(yaml).not_to include("scope: remove")
       end
     end
   end

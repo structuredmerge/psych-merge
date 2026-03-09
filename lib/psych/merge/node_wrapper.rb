@@ -31,17 +31,21 @@ module Psych
       # @return [Array<String>] Source lines
       attr_reader :lines
 
+      # @return [CommentTracker, nil] Comment tracker used to associate comments
+      attr_reader :comment_tracker
+
       # @param node [Psych::Nodes::Node] Psych node to wrap
       # @param lines [Array<String>] Source lines for content extraction
       # @param leading_comments [Array<Hash>] Comments before this node
       # @param inline_comment [Hash, nil] Inline comment on the node's line
       # @param key [String, nil] Key name if this is a mapping value
-      def initialize(node, lines:, leading_comments: [], inline_comment: nil, key: nil)
+      def initialize(node, lines:, leading_comments: [], inline_comment: nil, key: nil, comment_tracker: nil)
         @node = node
         @lines = lines
         @leading_comments = leading_comments
         @inline_comment = inline_comment
         @key = key
+        @comment_tracker = comment_tracker
 
         # Extract line information from the Psych node.
         #
@@ -174,6 +178,38 @@ module Psych
         (@start_line..@end_line).map { |ln| @lines[ln - 1] }.join
       end
 
+      # Get a passive shared comment attachment for this node wrapper.
+      #
+      # @return [Ast::Merge::Comment::Attachment]
+      def comment_attachment
+        @comment_attachment ||= if @comment_tracker
+          @comment_tracker.comment_attachment_for(
+            self,
+            line_num: @start_line,
+            leading_comments: @leading_comments,
+            inline_comment: @inline_comment,
+            key: @key,
+          )
+        else
+          Ast::Merge::Comment::Attachment.new(
+            owner: self,
+            leading_region: build_comment_region(:leading, @leading_comments),
+            inline_region: build_comment_region(:inline, [@inline_comment].compact),
+            metadata: {key: @key},
+          )
+        end
+      end
+
+      # @return [Ast::Merge::Comment::Region, nil]
+      def leading_comment_region
+        comment_attachment.leading_region
+      end
+
+      # @return [Ast::Merge::Comment::Region, nil]
+      def inline_comment_region
+        comment_attachment.inline_region
+      end
+
       # String representation of the node value.
       # For scalars, returns the value.
       # For other nodes, returns inspect.
@@ -257,6 +293,17 @@ module Psych
           leading_comments: leading,
           inline_comment: inline,
           key: key,
+          comment_tracker: comment_tracker,
+        )
+      end
+
+      def build_comment_region(kind, comments)
+        return if comments.empty?
+
+        Ast::Merge::Comment::TrackedHashAdapter.region(
+          kind: kind,
+          comments: comments,
+          metadata: {key: @key},
         )
       end
     end

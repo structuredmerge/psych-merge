@@ -63,6 +63,54 @@ module Psych
         @errors.empty? && !@ast.nil?
       end
 
+      # Get shared comment capability information for this analysis.
+      #
+      # @return [Ast::Merge::Comment::Capability]
+      def comment_capability
+        @comment_capability ||= comment_tracker.augment(owners: []).capability
+      end
+
+      # Get all comments converted to shared Ast::Merge comment nodes.
+      #
+      # @return [Array<Ast::Merge::Comment::Line>]
+      def comment_nodes
+        comment_tracker.comment_nodes
+      end
+
+      # Get a shared Ast::Merge comment node at a specific line.
+      #
+      # @param line_num [Integer] 1-based line number
+      # @return [Ast::Merge::Comment::Line, nil]
+      def comment_node_at(line_num)
+        comment_tracker.comment_node_at(line_num)
+      end
+
+      # Get comments in a line range converted to a shared comment region.
+      #
+      # @param range [Range] Range of 1-based line numbers
+      # @param kind [Symbol] Region kind (:leading, :inline, :orphan, etc.)
+      # @param full_line_only [Boolean] Whether to keep only full-line comments
+      # @return [Ast::Merge::Comment::Region]
+      def comment_region_for_range(range, kind:, full_line_only: false)
+        comment_tracker.comment_region_for_range(
+          range,
+          kind: kind,
+          full_line_only: full_line_only,
+        )
+      end
+
+      # Build a passive shared comment augmenter for this analysis.
+      #
+      # @param owners [Array<#start_line,#end_line>, nil] Owners used for attachment inference
+      # @param options [Hash] Additional augmenter options
+      # @return [Ast::Merge::Comment::Augmenter]
+      def comment_augmenter(owners: nil, **options)
+        comment_tracker.augment(
+          owners: owners || comment_augmenter_default_owners,
+          **options
+        )
+      end
+
       # Check if a line is within a freeze block.
       #
       # NOTE: This method intentionally does NOT call `super` or use the base
@@ -111,7 +159,7 @@ module Psych
         root = doc.children&.first
         return [] unless root.is_a?(::Psych::Nodes::Mapping)
 
-        root_wrapper = NodeWrapper.new(root, lines: @lines)
+        root_wrapper = wrap_root_node(root)
         root_wrapper.mapping_entries(comment_tracker: @comment_tracker)
       end
 
@@ -126,10 +174,38 @@ module Psych
         root = doc.children&.first
         return unless root
 
-        NodeWrapper.new(root, lines: @lines)
+        wrap_root_node(root)
+      end
+
+      # Build a passive shared comment attachment for an owner.
+      #
+      # @param owner [Object] Structural owner for the attachment
+      # @param line_num [Integer, nil] Optional line number override
+      # @param options [Hash] Additional attachment metadata
+      # @return [Ast::Merge::Comment::Attachment]
+      def comment_attachment_for(owner, line_num: nil, **options)
+        @comment_tracker.comment_attachment_for(owner, line_num: line_num, **options)
       end
 
       private
+
+      def comment_augmenter_default_owners
+        statements.select { |statement| statement.respond_to?(:start_line) && statement.respond_to?(:end_line) }
+      end
+
+      def wrap_root_node(root)
+        line_num = if root.respond_to?(:start_line) && root.start_line
+          root.start_line + 1
+        end
+
+        NodeWrapper.new(
+          root,
+          lines: @lines,
+          leading_comments: line_num ? @comment_tracker.leading_comments_before(line_num) : [],
+          inline_comment: line_num ? @comment_tracker.inline_comment_at(line_num) : nil,
+          comment_tracker: @comment_tracker,
+        )
+      end
 
       def parse_yaml
         @ast = ::Psych.parse_stream(@source)
@@ -193,7 +269,7 @@ module Psych
 
         # For mappings, extract key-value pairs as individual nodes
         if root.is_a?(::Psych::Nodes::Mapping)
-          root_wrapper = NodeWrapper.new(root, lines: @lines)
+          root_wrapper = wrap_root_node(root)
           entries = root_wrapper.mapping_entries(comment_tracker: @comment_tracker)
 
           entries.each do |key_wrapper, value_wrapper|
@@ -222,7 +298,7 @@ module Psych
           end
         else
           # For sequences or scalars at root, wrap the whole thing
-          all_nodes << NodeWrapper.new(root, lines: @lines)
+          all_nodes << wrap_root_node(root)
         end
 
         # Add any remaining freeze blocks at the end (common to both branches)
@@ -268,6 +344,29 @@ module Psych
         @value = value
         @lines = lines
         @comment_tracker = comment_tracker
+      end
+
+      # Get a passive shared comment attachment for this mapping entry.
+      #
+      # @return [Ast::Merge::Comment::Attachment]
+      def comment_attachment
+        @comment_attachment ||= @comment_tracker.comment_attachment_for(
+          self,
+          line_num: @key.start_line,
+          leading_comments: @comment_tracker.leading_comments_before(@key.start_line || 1),
+          inline_comment: @comment_tracker.inline_comment_at(@key.start_line || 1),
+          key_name: key_name,
+        )
+      end
+
+      # @return [Ast::Merge::Comment::Region, nil]
+      def leading_comment_region
+        comment_attachment.leading_region
+      end
+
+      # @return [Ast::Merge::Comment::Region, nil]
+      def inline_comment_region
+        comment_attachment.inline_region
       end
 
       # Get the key name as a string

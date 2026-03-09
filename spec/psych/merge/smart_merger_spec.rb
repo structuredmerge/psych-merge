@@ -165,6 +165,119 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include("Important comment")
       end
 
+      it "preserves destination comments when template preference wins for a matched node" do
+        template = <<~YAML
+          # Template comment
+          key: template_value # template inline
+        YAML
+        dest = <<~YAML
+          # Destination comment
+          key: dest_value # destination inline
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+        )
+        result = merger.merge
+
+        expect(result).to include("# Destination comment")
+        expect(result).to include("key: template_value # destination inline")
+        expect(result).not_to include("# Template comment")
+        expect(result).not_to include("template inline")
+      end
+
+      it "preserves blank-line-separated destination comment blocks for nested matched mapping entries when template wins" do
+        template = <<~YAML
+          parent:
+            child: template_value
+        YAML
+        dest = <<~YAML
+          parent:
+            # Destination child docs
+            # More child docs
+
+            child: dest_value
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+        )
+        result = merger.merge
+
+        expect(result).to match(/parent:\n  # Destination child docs\n  # More child docs\n\n  child: template_value\n\z/)
+      end
+
+      it "preserves blank-line-separated destination comment blocks for nested matched sequence items" do
+        template = <<~YAML
+          parent:
+            items:
+              - template_value
+        YAML
+        dest = <<~YAML
+          parent:
+            items:
+              # Destination item docs
+              # More item docs
+
+              - dest_value
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+        )
+        result = merger.merge
+
+        expect(result).to match(/items:\n    # Destination item docs\n    # More item docs\n\n    - dest_value\n/)
+      end
+
+      it "preserves comment-only destination headers before template-only additions" do
+        template = <<~YAML
+          key: template_value
+        YAML
+        dest = <<~YAML
+          # Destination header
+          # More docs
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result).to include("# Destination header")
+        expect(result).to include("# More docs")
+        expect(result).to include("key: template_value")
+        expect(result.index("# Destination header")).to be < result.index("key: template_value")
+      end
+
+      it "preserves a blank line after a comment-only destination header before template-only additions" do
+        template = <<~YAML
+          key: template_value
+        YAML
+        dest = <<~YAML
+          # Destination header
+          # More docs
+
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result).to match(/# More docs\n\nkey: template_value\n\z/)
+      end
+
       it "preserves section-leading comments for recursively merged mappings" do
         template = <<~YAML
           # Header comment
@@ -800,6 +913,77 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).not_to include("should_be_gone")
     end
 
+    it "preserves leading comments for removed destination-only nodes" do
+      template = <<~YAML
+        keep_me: value
+      YAML
+
+      dest = <<~YAML
+        keep_me: dest_value
+
+        # Removed node comment
+        remove_me: should_be_gone
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_me: dest_value")
+      expect(result).to include("# Removed node comment")
+      expect(result).not_to include("remove_me: should_be_gone")
+    end
+
+    it "promotes inline comments for removed destination-only nodes into standalone comments" do
+      template = <<~YAML
+        keep_me: value
+      YAML
+
+      dest = <<~YAML
+        keep_me: dest_value
+        remove_me: should_be_gone # Removed node inline comment
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_me: dest_value")
+      expect(result).to include("# Removed node inline comment")
+      expect(result).not_to include("remove_me: should_be_gone")
+    end
+
+    it "preserves both leading and inline comments for removed destination-only nodes" do
+      template = <<~YAML
+        keep_me: value
+      YAML
+
+      dest = <<~YAML
+        keep_me: dest_value
+
+        # Removed node comment
+        remove_me: should_be_gone # Removed node inline comment
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_me: dest_value")
+      expect(result).to include("# Removed node comment")
+      expect(result).to include("# Removed node inline comment")
+      expect(result).not_to include("remove_me: should_be_gone")
+    end
+
     it "keeps destination-only nodes when disabled (default)" do
       template = <<~YAML
         keep_me: value
@@ -845,6 +1029,90 @@ RSpec.describe Psych::Merge::SmartMerger do
       result = merger.merge
 
       expect(result).to include("keep_this/**/*")
+      expect(result).not_to include("remove_this/**/*")
+    end
+
+    it "preserves leading comments for removed sequence items when enabled with recursive" do
+      template = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+      YAML
+
+      dest = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+            # Removed sequence item comment
+            - remove_this/**/*
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        recursive: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_this/**/*")
+      expect(result).to include("# Removed sequence item comment")
+      expect(result).not_to include("remove_this/**/*")
+    end
+
+    it "promotes inline comments for removed sequence items when enabled with recursive" do
+      template = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+      YAML
+
+      dest = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+            - remove_this/**/* # Removed sequence item inline comment
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        recursive: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_this/**/*")
+      expect(result).to include("# Removed sequence item inline comment")
+      expect(result).not_to include("remove_this/**/*")
+    end
+
+    it "preserves both leading and inline comments for removed sequence items when enabled with recursive" do
+      template = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+      YAML
+
+      dest = <<~YAML
+        AllCops:
+          Exclude:
+            - keep_this/**/*
+            # Removed sequence item comment
+            - remove_this/**/* # Removed sequence item inline comment
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        recursive: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("keep_this/**/*")
+      expect(result).to include("# Removed sequence item comment")
+      expect(result).to include("# Removed sequence item inline comment")
       expect(result).not_to include("remove_this/**/*")
     end
   end
@@ -990,6 +1258,555 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result.scan("github:").count).to eq(1)
       expect(result).to include("vendor/**/*")
       expect(result).to include("tmp/**/*")
+    end
+  end
+
+  describe "comment variation matrix" do
+    it "preserves deeper nested blank-line-separated destination comment blocks when template wins" do
+      template = <<~YAML
+        root:
+          parent:
+            child:
+              grandchild: template_value
+      YAML
+      dest = <<~YAML
+        root:
+          parent:
+            child:
+              # Destination grandchild docs
+              # More destination docs
+
+              grandchild: dest_value
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+      )
+      result = merger.merge
+
+      expect(result).to match(/root:\n  parent:\n    child:\n      # Destination grandchild docs\n      # More destination docs\n\n      grandchild: template_value\n\z/)
+    end
+
+    it "preserves matched nested comments while promoting removed nested sibling comments in the same parent" do
+      template = <<~YAML
+        settings:
+          keep: template_value
+      YAML
+      dest = <<~YAML
+        settings:
+          # Keep docs
+          keep: dest_value # keep inline
+
+          # Remove docs
+          remove_me: old_value # remove inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep docs")
+      expect(result).to include("keep: template_value # keep inline")
+      expect(result).to include("# Remove docs")
+      expect(result).to include("# remove inline")
+      expect(result).not_to include("remove_me: old_value")
+    end
+
+    it "handles commented flow and block hybrids in the same document" do
+      template = <<~YAML
+        funding:
+          github: [template_user]
+          ko_fi: pboling
+        AllCops:
+          Exclude:
+            - vendor/**/*
+            - tmp/**/*
+      YAML
+      dest = <<~YAML
+        funding:
+          # Funding docs
+          github: [dest_user] # github note
+          ko_fi: pboling
+        AllCops:
+          Exclude:
+            # Destination exclude docs
+            - vendor/**/* # keep vendor note
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Funding docs")
+      expect(result).to include("github: [template_user] # github note")
+      expect(result.scan("github:").count).to eq(1)
+      expect(result).to include("# Destination exclude docs")
+      expect(result).to include("- vendor/**/* # keep vendor note")
+      expect(result).to include("- tmp/**/*")
+    end
+
+    it "preserves multiple blank lines after nested destination comment-only sections before recursive content" do
+      template = <<~YAML
+        parent:
+          child: template_value
+          added: template_added
+      YAML
+      dest = <<~YAML
+        parent:
+          # Section docs
+          # More section docs
+
+
+          child: dest_value
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to match(/# More section docs\n\n\n  child: template_value\n  added: template_added\n\z/)
+    end
+
+    it "preserves blank-line-separated nested comment-only sections when a sibling is removed and another is added" do
+      template = <<~YAML
+        settings:
+          keep: template_value
+          added: template_added
+      YAML
+      dest = <<~YAML
+        settings:
+          # Keep docs
+          keep: dest_value # keep inline
+
+          # Shared section docs
+          # More shared docs
+
+
+          # Remove docs
+          remove_me: old_value # remove inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to match(/keep: template_value # keep inline\n\n  # Shared section docs\n  # More shared docs\n\n\n  # Remove docs\n  # remove inline\n  added: template_added\n\z/)
+    end
+
+    it "preserves surviving sequence item comments while promoting removed sibling item comments" do
+      template = <<~YAML
+        items:
+          - keep
+      YAML
+      dest = <<~YAML
+        items:
+          # Keep docs
+          - keep # keep inline
+
+          # Remove docs
+          - remove # remove inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        recursive: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep docs")
+      expect(result).to include("- keep # keep inline")
+      expect(result).to include("# Remove docs")
+      expect(result).to include("# remove inline")
+      expect(result).not_to include("- remove # remove inline")
+    end
+
+    it "recursively matches sequence items that are mappings while removing destination-only siblings" do
+      template = <<~YAML
+        items:
+          - name: keep
+            value: template_value
+          - name: added
+            value: template_added
+      YAML
+      dest = <<~YAML
+        items:
+          # Keep item docs
+          - name: keep
+            value: dest_value # keep inline
+
+          # Remove item docs
+          - name: remove
+            value: old_value # remove inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep item docs")
+      expect(result).to include("value: template_value # keep inline")
+      expect(result).to include("# Remove item docs")
+      expect(result).to include("# remove inline")
+      expect(result).to include("- name: added")
+      expect(result).to include("value: template_added")
+      expect(result).not_to include("- name: remove")
+      expect(result.scan(/- name: keep/).size).to eq(1)
+    end
+
+    it "recursively matches outer sequence items that are nested sequences while removing destination-only siblings" do
+      template = <<~YAML
+        groups:
+          # Keep group docs
+          - - keep
+            - template_inner
+          - - added
+            - template_added
+      YAML
+      dest = <<~YAML
+        groups:
+          # Keep group docs
+          - - keep # keep inline
+            - dest_inner
+
+          # Remove group docs
+          - - remove
+            - dest_removed # remove inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result.scan(/# Keep group docs/).size).to eq(1)
+      expect(result).to include("- - keep # keep inline")
+      expect(result).to include("- template_inner")
+      expect(result).to include("# Remove group docs")
+      expect(result).to include("# remove inline")
+      expect(result).to include("- - added")
+      expect(result).to include("- template_added")
+      expect(result).not_to include("- - remove")
+    end
+
+    it "preserves blank-line-separated nested mapping comments inside matched sequence items without spilling to siblings" do
+      template = <<~YAML
+        items:
+          - name: keep
+            config:
+              keep: template_value
+              add: template_added
+          - name: untouched
+            config:
+              stable: template_stable
+      YAML
+      dest = <<~YAML
+        items:
+          - name: keep
+            config:
+              # Keep docs
+              keep: dest_value # keep inline
+
+              # Shared section docs
+              # More shared docs
+
+              # Remove docs
+              remove: old_value # remove inline
+          - name: untouched
+            config:
+              stable: dest_stable
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep docs")
+      expect(result).to include("keep: template_value # keep inline")
+      expect(result).to match(/# Shared section docs\n      # More shared docs\n\n      # Remove docs/)
+      expect(result).to include("# remove inline")
+      expect(result).to include("add: template_added")
+      expect(result).to include("- name: untouched")
+      expect(result).to include("stable: template_stable")
+      expect(result.scan(/# Shared section docs/).size).to eq(1)
+      expect(result).not_to include("remove: old_value")
+    end
+
+    it "preserves nested sequence comments inside matched sequence-item mappings without spilling to siblings" do
+      template = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - keep_rule
+                - add_rule
+          - name: untouched
+            config:
+              stable: template_stable
+      YAML
+      dest = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                # Keep docs
+                - keep_rule # keep inline
+
+                # Shared section docs
+                # More shared docs
+
+                # Remove docs
+                - remove_rule # remove inline
+          - name: untouched
+            config:
+              stable: dest_stable
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep docs")
+      expect(result).to include("- keep_rule # keep inline")
+      expect(result).to include("# Shared section docs")
+      expect(result).to include("# More shared docs")
+      expect(result).to include("# Remove docs")
+      expect(result).to include("# remove inline")
+      expect(result).to include("- add_rule")
+      expect(result).to include("- name: untouched")
+      expect(result).to include("stable: template_stable")
+      expect(result.scan(/# Shared section docs/).size).to eq(1)
+      expect(result).not_to include("- remove_rule")
+      expect(result).to match(/# More shared docs\n\n        # Remove docs/)
+    end
+
+    it "preserves nested mapping-sequence comments inside matched sequence-item mappings without sibling spillover" do
+      template = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - id: keep
+                  value: template_value
+                - id: add
+                  value: template_added
+          - name: untouched
+            config:
+              stable: template_stable
+      YAML
+      dest = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                # Keep rule docs
+                - id: keep
+                  value: dest_value # keep inline
+
+                # Shared rule docs
+                # More shared rule docs
+
+                # Remove rule docs
+                - id: remove
+                  value: old_value # remove inline
+          - name: untouched
+            config:
+              stable: dest_stable
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to include("# Keep rule docs")
+      expect(result).to include("- id: keep")
+      expect(result).to include("value: template_value # keep inline")
+      expect(result).to include("# Shared rule docs")
+      expect(result).to include("# More shared rule docs")
+      expect(result).to include("# Remove rule docs")
+      expect(result).to include("# remove inline")
+      expect(result).to include("- id: add")
+      expect(result).to include("value: template_added")
+      expect(result).to include("- name: untouched")
+      expect(result).to include("stable: template_stable")
+      expect(result.scan(/# Shared rule docs/).size).to eq(1)
+      expect(result).not_to include("- id: remove")
+      expect(result).to match(/# More shared rule docs\n\n        # Remove rule docs/)
+    end
+
+    it "keeps destination order for matched inner mapping items while appending template-only additions" do
+      template = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - id: alpha
+                  value: template_alpha
+                - id: beta
+                  value: template_beta
+                - id: add
+                  value: template_add
+      YAML
+      dest = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - id: beta
+                  value: dest_beta # beta inline
+
+                # Removed rule docs
+                - id: remove
+                  value: dest_remove # remove inline
+
+                - id: alpha
+                  value: dest_alpha # alpha inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      beta_index = result.index("- id: beta")
+      alpha_index = result.index("- id: alpha")
+      add_index = result.index("- id: add")
+
+      expect(beta_index).not_to be_nil
+      expect(alpha_index).not_to be_nil
+      expect(add_index).not_to be_nil
+      expect(beta_index).to be < alpha_index
+      expect(alpha_index).to be < add_index
+      expect(result).to include("value: template_beta # beta inline")
+      expect(result).to include("value: template_alpha # alpha inline")
+      expect(result).to include("# Removed rule docs")
+      expect(result).to include("# remove inline")
+      expect(result.scan(/- id: alpha/).size).to eq(1)
+      expect(result.scan(/- id: beta/).size).to eq(1)
+      expect(result.scan(/- id: add/).size).to eq(1)
+      expect(result).not_to include("- id: remove")
+    end
+
+    it "matches duplicate inner ids 1:1 using stable secondary discriminators" do
+      template = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - id: alpha
+                  scope: first
+                  value: template_first
+                - id: alpha
+                  scope: second
+                  value: template_second
+                - id: alpha
+                  scope: add
+                  value: template_add
+      YAML
+      dest = <<~YAML
+        items:
+          - name: keep
+            config:
+              rules:
+                - id: alpha
+                  scope: second
+                  value: dest_second # second inline
+
+                # Removed duplicate docs
+                - id: alpha
+                  scope: remove
+                  value: dest_remove # remove inline
+
+                - id: alpha
+                  scope: first
+                  value: dest_first # first inline
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      second_index = result.index("scope: second")
+      first_index = result.index("scope: first")
+      add_index = result.index("scope: add")
+
+      expect(second_index).not_to be_nil
+      expect(first_index).not_to be_nil
+      expect(add_index).not_to be_nil
+      expect(second_index).to be < first_index
+      expect(first_index).to be < add_index
+      expect(result).to include("value: template_second # second inline")
+      expect(result).to include("value: template_first # first inline")
+      expect(result).to include("# Removed duplicate docs")
+      expect(result).to include("# remove inline")
+      expect(result.scan(/scope: first/).size).to eq(1)
+      expect(result.scan(/scope: second/).size).to eq(1)
+      expect(result.scan(/scope: add/).size).to eq(1)
+      expect(result).not_to include("scope: remove")
     end
   end
 end
