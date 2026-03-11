@@ -15,6 +15,15 @@ eval_gemfile "gemfiles/modular/documentation.gemfile"
 eval_gemfile "gemfiles/modular/optional.gemfile"
 eval_gemfile "gemfiles/modular/x_std_libs.gemfile"
 
-if ENV.fetch("KETTLE_RB_DEV", "false").casecmp?("true")
-  gem "ast-merge", path: "../../"
+unless ENV.fetch("KETTLE_RB_DEV", "false").casecmp("false").zero?
+  require File.expand_path("../nomono/lib/nomono/bundler", __dir__)
+
+  eval_nomono_gems(
+    gems: %w[ast-merge],
+    prefix: "KETTLE_RB",
+    path_env: "KETTLE_RB_DEV",
+    vendored_gems_env: "VENDORED_GEMS",
+    vendor_gem_dir_env: "VENDOR_GEM_DIR",
+    debug_env: "KETTLE_DEV_DEBUG"
+  )
 end
