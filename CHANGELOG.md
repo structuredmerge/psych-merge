@@ -20,6 +20,8 @@ Please file a bug if you notice a violation of semantic versioning.
 
 ### Added
 
+- Added shared `Ast::Merge::Comment` region, attachment, and augmenter adoption over Psych comment tracking, including normalized analysis and wrapper attachment APIs plus shared-example compliance coverage
+
 ### Changed
 
 - **BREAKING**: `ConflictResolver#merge_nodes_to_emitter` signature simplified to
@@ -30,6 +32,8 @@ Please file a bug if you notice a violation of semantic versioning.
   with the same signature are matched 1:1 in order rather than collapsed.
   The `nested_dest_by_sig` build in `emit_recursive_mapping_merge` was also
   removed as dead code.
+- Preserved normalized comment regions and attachments through YAML emission and merge paths while keeping document boundaries, recursive comment-heavy fixtures, and destination-leading / inline ownership stable under template preference
+- Clarified the YAML removal-mode baseline so `remove_template_missing_nodes: true` preserves or promotes comment regions for removed destination-only mappings instead of silently dropping them
 
 ### Fixed
 

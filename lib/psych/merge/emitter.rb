@@ -168,7 +168,20 @@ module Psych
           end
         end.join(" ").strip
 
-        emit_comment(text, inline: true) unless text.empty?
+        return if text.empty? || @lines.empty?
+
+        tracked_hash = region.respond_to?(:metadata) ? Array(region.metadata[:tracked_hashes]).first : nil
+        indent = tracked_hash && (tracked_hash[:indent] || tracked_hash["indent"])
+
+        unless indent
+          emit_comment(text, inline: true)
+          return
+        end
+
+        base = @lines[-1].to_s.rstrip
+        target_column = [indent.to_i, base.length + 1].max
+        comment_suffix = text.empty? ? "#" : "# #{text}"
+        @lines[-1] = base.ljust(target_column) + comment_suffix
       end
 
       def emit_comment_node(node)

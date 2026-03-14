@@ -351,10 +351,12 @@ RSpec.describe Psych::Merge::SmartMerger do
           # General rules:
           tokens:
             forge:
-              gh_user: ""
+              gh_user: ""        # GitHub username only, no @, no URL. Used for GitHub Sponsors and profile links. ENV: KJ_GH_USER
+              gl_user: ""        # GitLab username only, no @, no URL. Used for profile links. ENV: KJ_GL_USER
 
             author:
-              name: "{KJ|AUTHOR:NAME}"
+              name: "{KJ|AUTHOR:NAME}"                 # Full display name. Example: Peter H. Boling. ENV: KJ_AUTHOR_NAME. Auto-seeded from gemspec authors.first
+              given_names: "{KJ|AUTHOR:GIVEN_NAMES}"   # Given/personal names only. Example: Peter H. ENV: KJ_AUTHOR_GIVEN_NAMES. Auto-seeded when AUTHOR:NAME can be split
 
           # Glob patterns evaluated in order (first match wins)
           patterns:
@@ -387,10 +389,12 @@ RSpec.describe Psych::Merge::SmartMerger do
           # General rules:
           tokens:
             forge:
-              gh_user: ""
+              gh_user: ""        # GitHub username only, no @, no URL. Used for GitHub Sponsors and profile links. ENV: KJ_GH_USER
+              gl_user: ""        # GitLab username only, no @, no URL. Used for profile links. ENV: KJ_GL_USER
 
             author:
-              name: "Peter H. Boling"
+              name: "Peter H. Boling"                 # Full display name. Example: Peter H. Boling. ENV: KJ_AUTHOR_NAME. Auto-seeded from gemspec authors.first
+              given_names: "Peter H."                 # Given/personal names only. Example: Peter H. ENV: KJ_AUTHOR_GIVEN_NAMES. Auto-seeded when AUTHOR:NAME can be split
 
           # Glob patterns evaluated in order (first match wins)
           patterns:
