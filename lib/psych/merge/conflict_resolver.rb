@@ -634,7 +634,12 @@ module Psych
         content_start_line = mapping_entry_content_start_line(entry)
         return unless content_start_line
 
-        leading_region = preferred_leading_comment_region(entry, comment_source_node)
+        leading_region = preferred_leading_comment_region(
+          entry,
+          comment_source_node,
+          analysis: analysis,
+          comment_analysis: comment_analysis,
+        )
         if leading_region && !leading_region.empty?
           source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
           source_node = resolved_comment_node(entry, comment_source_node, leading_region)
@@ -664,7 +669,12 @@ module Psych
         content_start_line = node_content_start_line(node)
         return unless content_start_line
 
-        leading_region = preferred_leading_comment_region(node, comment_source_node)
+        leading_region = preferred_leading_comment_region(
+          node,
+          comment_source_node,
+          analysis: analysis,
+          comment_analysis: comment_analysis,
+        )
         if leading_region && !leading_region.empty?
           source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
           source_node = resolved_comment_node(node, comment_source_node, leading_region)
@@ -678,22 +688,6 @@ module Psych
           ) if source_analysis && source_content_start_line
           return
         end
-
-        return unless node.respond_to?(:start_line) && node.start_line
-        return unless analysis.respond_to?(:comment_tracker)
-
-        leading = analysis.comment_tracker.leading_comments_before(node.start_line)
-        unless leading.empty?
-          leading.each do |comment|
-            @emitter.emit_tracked_comment(comment)
-          end
-          # Preserve blank line between comments and the node if one existed
-          last_comment_line = leading.last[:line]
-          if node.start_line - last_comment_line > 1 &&
-              analysis.comment_tracker.blank_line?(last_comment_line + 1)
-            @emitter.emit_blank_line
-          end
-        end
       end
 
       def emit_mapping_entry_key_line(entry, analysis, comment_source_node: nil, comment_analysis: analysis)
@@ -706,13 +700,18 @@ module Psych
       end
 
       def emit_node_first_line(line, node, analysis, comment_source_node: nil, comment_analysis: analysis)
-        inline_region = preferred_inline_comment_region(node, comment_source_node)
+        inline_region = preferred_inline_comment_region(
+          node,
+          comment_source_node,
+          analysis: analysis,
+          comment_analysis: comment_analysis,
+        )
         unless inline_region && !inline_region.empty?
           @emitter.emit_raw_lines([line])
           return
         end
 
-        existing_inline_region = node_inline_comment_region(node)
+        existing_inline_region = node_inline_comment_region(node, analysis)
         line = strip_inline_comment_from_line(line, existing_inline_region) if existing_inline_region && !existing_inline_region.empty?
 
         @emitter.emit_raw_lines([line])
@@ -724,7 +723,7 @@ module Psych
       end
 
       def emit_removed_destination_node_comments(node, analysis)
-        leading_region = node_leading_comment_region(node)
+        leading_region = node_leading_comment_region(node, analysis)
         content_start_line = node_content_start_line(node)
         if leading_region && !leading_region.empty?
           @emitter.emit_comment_region(leading_region, source_lines: analysis.lines)
@@ -735,20 +734,10 @@ module Psych
       end
 
       def emit_removed_destination_node_inline_comments(node, analysis)
-        inline_region = node_inline_comment_region(node)
+        inline_region = node_inline_comment_region(node, analysis)
         return unless inline_region && !inline_region.empty?
 
-        tracked_hashes = Array(inline_region.metadata[:tracked_hashes])
-        if tracked_hashes.any?
-          tracked_hashes.each do |comment|
-            line_num = comment[:line] || comment["line"]
-            line = analysis.line_at(line_num)
-            indent = line.to_s[/\A\s*/].to_s.length
-            @emitter.emit_tracked_comment(comment.merge(indent: indent))
-          end
-        else
-          @emitter.emit_comment_region(inline_region, inline: false, source_lines: analysis.lines)
-        end
+        @emitter.emit_raw_lines(promoted_inline_comment_lines(inline_region, node, analysis))
       end
 
       def emit_removed_sequence_item_comments(item, analysis, depth:)
@@ -984,12 +973,9 @@ module Psych
       def effective_start_line(node, analysis)
         return unless node
 
-        leading_region = node_leading_comment_region(node)
+        leading_region = node_leading_comment_region(node, analysis)
         return leading_region.start_line if leading_region && leading_region.start_line
-        return node.start_line unless analysis.respond_to?(:comment_tracker) && node.respond_to?(:start_line) && node.start_line
-
-        leading = analysis.comment_tracker.leading_comments_before(node.start_line)
-        leading.any? && leading.first[:line] ? leading.first[:line] : node.start_line
+        node.start_line if node.respond_to?(:start_line) && node.start_line
       end
 
       def mapping_entry_content_start_line(entry)
@@ -999,37 +985,50 @@ module Psych
         nil
       end
 
-      def node_leading_comment_region(node)
+      def resolved_comment_attachment(node, analysis = nil)
+        return unless node
+
+        return node.comment_attachment if node.respond_to?(:comment_attachment)
+        return unless analysis && analysis.respond_to?(:comment_attachment_for)
+
+        analysis.comment_attachment_for(node, line_num: node_content_start_line(node))
+      end
+
+      def node_leading_comment_region(node, analysis = nil)
+        attachment = resolved_comment_attachment(node, analysis)
+        return attachment.leading_region if attachment&.respond_to?(:leading_region)
         return unless node.respond_to?(:leading_comment_region)
 
         node.leading_comment_region
       end
 
-      def node_inline_comment_region(node)
+      def node_inline_comment_region(node, analysis = nil)
+        attachment = resolved_comment_attachment(node, analysis)
+        return attachment.inline_region if attachment&.respond_to?(:inline_region)
         return unless node.respond_to?(:inline_comment_region)
 
         node.inline_comment_region
       end
 
-      def preferred_leading_comment_region(node, comment_source_node = nil)
-        source_region = node_leading_comment_region(comment_source_node) if comment_source_node
+      def preferred_leading_comment_region(node, comment_source_node = nil, analysis: nil, comment_analysis: analysis)
+        source_region = node_leading_comment_region(comment_source_node, comment_analysis) if comment_source_node
         return source_region if source_region && !source_region.empty?
 
-        node_leading_comment_region(node)
+        node_leading_comment_region(node, analysis)
       end
 
-      def preferred_inline_comment_region(node, comment_source_node = nil)
-        source_region = node_inline_comment_region(comment_source_node) if comment_source_node
+      def preferred_inline_comment_region(node, comment_source_node = nil, analysis: nil, comment_analysis: analysis)
+        source_region = node_inline_comment_region(comment_source_node, comment_analysis) if comment_source_node
         return source_region if source_region && !source_region.empty?
 
-        node_inline_comment_region(node)
+        node_inline_comment_region(node, analysis)
       end
 
       def resolved_comment_analysis(default_analysis, comment_source_node, comment_analysis, region)
         return default_analysis unless comment_source_node && comment_analysis
 
-        source_leading = node_leading_comment_region(comment_source_node)
-        source_inline = node_inline_comment_region(comment_source_node)
+        source_leading = node_leading_comment_region(comment_source_node, comment_analysis)
+        source_inline = node_inline_comment_region(comment_source_node, comment_analysis)
         return comment_analysis if source_leading.equal?(region) || source_inline.equal?(region)
 
         default_analysis
@@ -1055,6 +1054,23 @@ module Psych
           lines << line if line && line.strip.empty?
         end
         @emitter.emit_raw_lines(lines) if lines.any?
+      end
+
+      def promoted_inline_comment_lines(inline_region, node, analysis)
+        base_indent = analysis.line_at(node_content_start_line(node)).to_s[/\A\s*/].to_s
+
+        inline_region.nodes.map do |comment_node|
+          content = if comment_node.respond_to?(:normalized_content)
+            comment_node.normalized_content.to_s
+          else
+            comment_node.to_s.sub(/\A\s*#\s?/, "")
+          end
+
+          line = +base_indent
+          line << "#"
+          line << " #{content}" unless content.empty?
+          line
+        end
       end
 
       def strip_inline_comment_from_line(line, inline_region)

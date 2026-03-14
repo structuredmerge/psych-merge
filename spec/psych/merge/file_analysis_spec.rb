@@ -1,6 +1,29 @@
 # frozen_string_literal: true
 
 RSpec.describe Psych::Merge::FileAnalysis do
+  it_behaves_like "Ast::Merge::FileAnalyzable" do
+    let(:file_analysis_class) { described_class }
+    let(:freeze_node_class) { Psych::Merge::FreezeNode }
+    let(:sample_source) do
+      <<~YAML
+        key: value
+        other: stuff
+      YAML
+    end
+    let(:sample_source_with_freeze) do
+      <<~YAML
+        before: value
+        # psych-merge:freeze
+        frozen: secret
+        # psych-merge:unfreeze
+        after: value
+      YAML
+    end
+    let(:build_file_analysis) do
+      ->(source, **opts) { described_class.new(source, **opts) }
+    end
+  end
+
   describe "#initialize" do
     it "parses valid YAML" do
       yaml = <<~YAML
@@ -296,6 +319,34 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(attachment.inline_region.normalized_content).to eq("inline defaults")
       expect(augmenter.postlude_region).to be_nil
     end
+
+    context "shared example compliance" do
+      let(:analysis) { described_class.new(yaml) }
+
+      context "for a normalized region" do
+        let(:comment_region) { analysis.comment_region_for_range(1..1, kind: :leading) }
+        let(:expected_region_kind) { :leading }
+        let(:expected_region_content) { "Header comment" }
+        let(:expected_region_lines) { 1..1 }
+        let(:freeze_token) { "psych-merge" }
+        let(:freeze_marker_expected) { false }
+
+        it_behaves_like "Ast::Merge::Comment::Region"
+      end
+
+      context "for the passive augmenter" do
+        let(:comment_augmenter) { analysis.comment_augmenter }
+        let(:augmenter_owner) { analysis.statements.first }
+        let(:expected_capability_predicate) { :source_augmented? }
+        let(:expected_leading_content) { nil }
+        let(:expected_inline_content) { "inline defaults" }
+        let(:expected_preamble_content) { nil }
+        let(:expected_postlude_content) { nil }
+        let(:expected_orphan_contents) { ["Header comment", "Trailing comment"] }
+
+        it_behaves_like "Ast::Merge::Comment::Augmenter"
+      end
+    end
   end
 
   describe "#root_mapping_entries" do
@@ -581,12 +632,32 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(entry.inline_comment_region).to be_nil
     end
 
+    context "shared example compliance" do
+      let(:comment_attachment) { entry.comment_attachment }
+      let(:expected_attachment_owner) { entry }
+      let(:expected_leading_content) { "Leading comment" }
+      let(:expected_inline_content) { nil }
+      let(:expected_trailing_content) { nil }
+      let(:expected_orphan_contents) { [] }
+      let(:freeze_token) { "psych-merge" }
+      let(:freeze_marker_expected) { false }
+
+      it_behaves_like "Ast::Merge::Comment::Attachment"
+    end
+
     describe "#line_range" do
       it "returns nil when start_line is nil" do
         # Create an entry where the key has no line info
         mock_key = instance_double(Psych::Merge::NodeWrapper, start_line: nil, end_line: nil, value: "key")
         mock_value = instance_double(Psych::Merge::NodeWrapper, end_line: nil)
-        mock_tracker = instance_double(Psych::Merge::CommentTracker, leading_comments_before: [])
+        mock_tracker = instance_double(
+          Psych::Merge::CommentTracker,
+          leading_comments_before: [],
+          inline_comment_at: nil,
+        )
+        allow(mock_tracker).to receive(:comment_attachment_for) do |owner, **_options|
+          Ast::Merge::Comment::Attachment.new(owner: owner)
+        end
 
         entry = Psych::Merge::MappingEntry.new(
           key: mock_key,
@@ -603,7 +674,14 @@ RSpec.describe Psych::Merge::FileAnalysis do
       it "returns empty string when start_line is nil" do
         mock_key = instance_double(Psych::Merge::NodeWrapper, start_line: nil, end_line: nil, value: "key")
         mock_value = instance_double(Psych::Merge::NodeWrapper, end_line: nil)
-        mock_tracker = instance_double(Psych::Merge::CommentTracker, leading_comments_before: [])
+        mock_tracker = instance_double(
+          Psych::Merge::CommentTracker,
+          leading_comments_before: [],
+          inline_comment_at: nil,
+        )
+        allow(mock_tracker).to receive(:comment_attachment_for) do |owner, **_options|
+          Ast::Merge::Comment::Attachment.new(owner: owner)
+        end
 
         entry = Psych::Merge::MappingEntry.new(
           key: mock_key,
@@ -620,7 +698,14 @@ RSpec.describe Psych::Merge::FileAnalysis do
       it "falls back to key end_line when value end_line is nil" do
         mock_key = instance_double(Psych::Merge::NodeWrapper, start_line: 1, end_line: 2, value: "key")
         mock_value = instance_double(Psych::Merge::NodeWrapper, end_line: nil)
-        mock_tracker = instance_double(Psych::Merge::CommentTracker, leading_comments_before: [])
+        mock_tracker = instance_double(
+          Psych::Merge::CommentTracker,
+          leading_comments_before: [],
+          inline_comment_at: nil,
+        )
+        allow(mock_tracker).to receive(:comment_attachment_for) do |owner, **_options|
+          Ast::Merge::Comment::Attachment.new(owner: owner)
+        end
 
         entry = Psych::Merge::MappingEntry.new(
           key: mock_key,

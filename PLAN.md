@@ -47,6 +47,20 @@ This gem is the baseline for shared comment regions, attachments, document prelu
 - Reference baseline / keep-green track.
 - This gem is not the next feature target unless family rollout work exposes a shared API gap or a regression.
 
+## Latest `ast-merge` Comment Logic Checklist (2026-03-13)
+- [x] Shared capability plumbing: canonical `comment_capability`, `comment_augmenter`, normalized region/attachment APIs
+- [x] Document boundary ownership: prelude/postlude and comment-only document handling
+- [x] Matched-node fallback: destination comment preservation under template preference
+- [x] Removed-node preservation: destination-only node comment preservation/promotion
+- [x] Recursive/fixture parity: deep recursive comment-heavy scenarios covered by reproducible fixtures
+- [x] Shared-example compliance: `Ast::Merge::FileAnalyzable` plus shared comment region/attachment/augmenter expectations pinned in focused specs
+
+Current parity status: complete baseline; continue in keep-green and regression-capture mode, with local workspace-path gem wiring also revalidated under `KETTLE_RB_DEV`.
+
+## Progress
+- 2026-03-13: Local workspace-path validation rechecked after modular gemfile wiring normalization.
+- Replaced direct local `path:` overrides in modular tree-sitter gemfiles with the shared `nomono` local-override pattern and reran the full `psych-merge` suite in workspace mode; the suite remains green.
+
 ## Execution Backlog
 
 ### Slice 1 — Keep the baseline stable

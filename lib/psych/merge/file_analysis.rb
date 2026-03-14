@@ -378,13 +378,7 @@ module Psych
       # Get the start line (from the key)
       # @return [Integer, nil]
       def start_line
-        # Include leading comments in start line
-        leading = @comment_tracker.leading_comments_before(@key.start_line || 1)
-        if leading.any?
-          leading.first[:line]
-        else
-          @key.start_line
-        end
+        leading_comment_region&.start_line || @key.start_line
       end
 
       # Get the end line (from the value)
