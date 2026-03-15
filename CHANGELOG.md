@@ -41,9 +41,9 @@ Please file a bug if you notice a violation of semantic versioning.
   from the destination, so visual spacing between YAML sections (e.g., between
   `name:` and `on:` in GitHub Actions workflows) is maintained after merge
 - Fix recursive sequence item matching for mapping entries identified by
-  globally unique scalar keys such as `value`, `email`, and `orcid`, preventing
-  duplicate YAML sequence items in citation-style documents when template and
-  destination entries should merge 1:1
+  globally unique scalar keys such as `value` and `orcid`, preferring stable
+  identities over mutable fields like `email` so citation-style YAML sequences
+  merge 1:1 instead of duplicating author entries
 - Fix template-preference document boundary emission so top-level YAML prelude /
   postlude comment regions and matched mapping-entry preludes are emitted from
   the template side instead of being dropped or replaced by destination-only

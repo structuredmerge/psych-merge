@@ -839,7 +839,7 @@ module Psych
         end
         return if scalar_entries.empty?
 
-        %w[path file pattern value email orcid id name key type given-names family-names].each do |identity_key|
+        %w[path file pattern orcid id value name key type email given-names family-names].each do |identity_key|
           pair = scalar_entries.find { |key, _value| key == identity_key }
           next unless pair
 

@@ -149,6 +149,38 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
         expect(result.scan(/strategy: raw_copy/).size).to eq(1)
       end
+
+      it "matches citation-style author entries by orcid before mutable email fields" do
+        template = <<~YAML
+          authors:
+            - given-names: "Peter H."
+              family-names: "Boling"
+              email: "floss@glatzo.com"
+              affiliation: "galtzo.com"
+              orcid: 'https://orcid.org/0009-0008-8519-441X'
+        YAML
+        dest = <<~YAML
+          authors:
+            - given-names: Peter Hurn
+              family-names: Boling
+              email: floss@galtzo.com
+              affiliation: galtzo.com
+              orcid: 'https://orcid.org/0009-0008-8519-441X'
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/given-names:/).size).to eq(1)
+        expect(result).to include('given-names: "Peter H."')
+        expect(result).to include('email: "floss@glatzo.com"')
+        expect(result).not_to include("Peter Hurn")
+      end
     end
 
     context "with comments" do
