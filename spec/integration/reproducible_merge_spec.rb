@@ -100,5 +100,23 @@ RSpec.describe "Psych reproducible merge" do
         remove_template_missing_nodes: true,
       }
     end
+
+    context "when sequence mapping items rely on globally unique keys like orcid, email, or value" do
+      it_behaves_like "a reproducible merge", "14_sequence_mapping_items_match_on_orcid_email_and_value", {
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      }
+    end
+
+    context "when template-only document boundary comments surround matched top-level mappings" do
+      it_behaves_like "a reproducible merge", "15_preferred_document_boundary_comments_are_preserved", {
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+        remove_template_missing_nodes: true,
+      }
+    end
   end
 end

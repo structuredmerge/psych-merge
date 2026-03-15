@@ -144,7 +144,10 @@ module Psych
         next_template_by_id = build_next_node_lookup(template_nodes)
         next_dest_by_id = build_next_node_lookup(dest_nodes)
 
-        emit_document_prelude(@dest_analysis, nodes: dest_nodes) if emit_destination_postlude
+        if emit_destination_postlude
+          document_analysis, document_nodes = preferred_document_context(template_nodes, dest_nodes)
+          emit_document_prelude(document_analysis, nodes: document_nodes)
+        end
 
         # Track consumed individual node indices (not just signatures) so that
         # multiple nodes sharing the same signature are matched 1:1 in order
@@ -290,11 +293,18 @@ module Psych
         end
 
         if emit_destination_postlude
+          document_analysis, document_nodes = preferred_document_context(template_nodes, dest_nodes)
           emit_document_postlude(
-            @dest_analysis,
-            fallback_node: dest_nodes.last,
+            document_analysis,
+            fallback_node: document_nodes.last,
           )
         end
+      end
+
+      def preferred_document_context(template_nodes, dest_nodes)
+        return [@template_analysis, template_nodes] if default_preference == :template
+
+        [@dest_analysis, dest_nodes]
       end
 
       def emit_preferred_node(template_node, dest_node, next_template_node: nil, next_dest_node: nil)
@@ -398,8 +408,23 @@ module Psych
         # Preserve the destination prelude (leading comments / blank lines) for
         # recursively merged mapping entries, then emit the key line.
         if dest_node.respond_to?(:key) && dest_node.key
-          emit_mapping_entry_prelude(dest_node, @dest_analysis)
-          emit_mapping_entry_key_line(dest_node, @dest_analysis)
+          if preference_for_pair(template_node, dest_node) == :destination
+            emit_mapping_entry_prelude(dest_node, @dest_analysis)
+            emit_mapping_entry_key_line(dest_node, @dest_analysis)
+          else
+            emit_mapping_entry_prelude(
+              template_node,
+              @template_analysis,
+              comment_source_node: dest_node,
+              comment_analysis: @dest_analysis,
+            )
+            emit_mapping_entry_key_line(
+              template_node,
+              @template_analysis,
+              comment_source_node: dest_node,
+              comment_analysis: @dest_analysis,
+            )
+          end
         end
 
         if template_node.mapping? && dest_node.mapping?
@@ -814,12 +839,14 @@ module Psych
         end
         return if scalar_entries.empty?
 
-        %w[id name key path file pattern].each do |identity_key|
+        %w[path file pattern value email orcid id name key type given-names family-names].each do |identity_key|
           pair = scalar_entries.find { |key, _value| key == identity_key }
           next unless pair
 
+          return [:mapping_scalar_identity, identity_key, pair[1]] if globally_unique_sequence_mapping_key?(identity_key)
+
           stable_auxiliary_pairs = scalar_entries.reject do |key, _value|
-            key == identity_key || key == "value"
+            key == identity_key || ignored_auxiliary_sequence_keys_for(identity_key).include?(key)
           end.sort_by(&:first)
 
           return [:mapping_scalar_identity, identity_key, pair[1], stable_auxiliary_pairs] if stable_auxiliary_pairs.any?
@@ -830,6 +857,16 @@ module Psych
         return [:mapping_scalar_identity, scalar_entries.first[0], scalar_entries.first[1]] if scalar_entries.one?
 
         nil
+      end
+
+      def globally_unique_sequence_mapping_key?(identity_key)
+        %w[path file pattern value email orcid].include?(identity_key)
+      end
+
+      def ignored_auxiliary_sequence_keys_for(identity_key)
+        ignored = ["value"]
+        ignored << "type" if identity_key == "value"
+        ignored
       end
 
       def sequence_nested_item_identity(item, analysis)
@@ -912,16 +949,23 @@ module Psych
 
       def emit_document_postlude(analysis, fallback_node: nil)
         augmenter = document_comment_augmenter_for(analysis)
-        postlude = augmenter&.postlude_region
+        regions = document_trailing_regions_for(augmenter, analysis, fallback_node)
 
-        if postlude && !postlude.empty?
-          if fallback_node && postlude.respond_to?(:start_line) && postlude.start_line
-            last_content_line = effective_end_line(fallback_node, analysis)
-            emit_interstitial_blank_lines(last_content_line + 1, postlude.start_line - 1, analysis) if last_content_line
-          end
-          @emitter.emit_comment_region(postlude, source_lines: analysis.lines)
-        else
+        if regions.empty?
           emit_trailing_lines_after_last_node(fallback_node, analysis)
+          return
+        end
+
+        last_content_line = effective_end_line(fallback_node, analysis)
+        previous_end_line = last_content_line
+
+        regions.each do |region|
+          if previous_end_line && region.respond_to?(:start_line) && region.start_line
+            emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
+          end
+
+          @emitter.emit_comment_region(region, source_lines: analysis.lines)
+          previous_end_line = region.end_line if region.respond_to?(:end_line)
         end
       end
 
@@ -930,18 +974,16 @@ module Psych
         return unless augmenter
 
         normalized_nodes = Array(nodes)
-        regions = []
-        preamble = augmenter.preamble_region
-        regions << preamble if preamble && !preamble.empty?
+        regions = document_leading_regions_for(augmenter, normalized_nodes, analysis)
 
-        if normalized_nodes.empty?
-          augmenter.orphan_regions.each do |region|
-            regions << region if region && !region.empty?
-          end
-        end
-
+        previous_end_line = nil
         regions.each do |region|
+          if previous_end_line && region.respond_to?(:start_line) && region.start_line
+            emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
+          end
+
           @emitter.emit_comment_region(region, source_lines: analysis.lines)
+          previous_end_line = region.end_line if region.respond_to?(:end_line)
         end
 
         return if regions.empty?
@@ -958,6 +1000,39 @@ module Psych
       def document_comment_augmenter_for(analysis)
         @document_comment_augmenters ||= {}
         @document_comment_augmenters[analysis.object_id] ||= analysis.comment_augmenter
+      end
+
+      def document_leading_regions_for(augmenter, nodes, analysis)
+        regions = []
+        preamble = augmenter&.preamble_region
+        regions << preamble if preamble && !preamble.empty?
+
+        first_node_start = if nodes.any?
+          effective_start_line(nodes.first, analysis)
+        end
+
+        Array(augmenter&.orphan_regions).each do |region|
+          next unless region && !region.empty?
+          next if first_node_start && region.respond_to?(:end_line) && region.end_line && region.end_line >= first_node_start
+
+          regions << region
+        end
+
+        regions.sort_by { |region| region.start_line || 0 }
+      end
+
+      def document_trailing_regions_for(augmenter, analysis, fallback_node)
+        last_content_line = effective_end_line(fallback_node, analysis)
+        regions = Array(augmenter&.orphan_regions).select do |region|
+          next false unless region && !region.empty?
+          next true unless last_content_line
+
+          region.respond_to?(:start_line) && region.start_line && region.start_line > last_content_line
+        end
+
+        postlude = augmenter&.postlude_region
+        regions << postlude if postlude && !postlude.empty?
+        regions.sort_by { |region| region.start_line || 0 }
       end
 
       def node_content_start_line(node)

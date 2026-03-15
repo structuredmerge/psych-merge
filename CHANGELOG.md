@@ -40,6 +40,14 @@ Please file a bug if you notice a violation of semantic versioning.
 - `ConflictResolver#merge_nodes_to_emitter` now preserves inter-node blank lines
   from the destination, so visual spacing between YAML sections (e.g., between
   `name:` and `on:` in GitHub Actions workflows) is maintained after merge
+- Fix recursive sequence item matching for mapping entries identified by
+  globally unique scalar keys such as `value`, `email`, and `orcid`, preventing
+  duplicate YAML sequence items in citation-style documents when template and
+  destination entries should merge 1:1
+- Fix template-preference document boundary emission so top-level YAML prelude /
+  postlude comment regions and matched mapping-entry preludes are emitted from
+  the template side instead of being dropped or replaced by destination-only
+  boundaries in `.kettle-jem.yml`-style files
 - Fix flow sequence duplication in recursive merge. YAML entries with flow sequence
   values (e.g., `github: [pboling]`) were duplicated because `can_merge_recursively?`
   returned `true` for sequences, causing `emit_recursive_merge` to emit the key line,
