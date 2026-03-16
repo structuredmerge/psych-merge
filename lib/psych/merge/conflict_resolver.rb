@@ -357,6 +357,8 @@ module Psych
         return false unless template_node.respond_to?(:mapping?) && dest_node.respond_to?(:mapping?)
 
         if template_node.mapping? && dest_node.mapping?
+          return false if sequence_item_mapping_reorder_requires_whole_item?(template_node, dest_node)
+
           !flow_mapping?(template_node) && !flow_mapping?(dest_node)
         elsif template_node.sequence? && dest_node.sequence?
           # Flow sequences (e.g., `key: [val1, val2]`) occupy the same physical
@@ -397,6 +399,25 @@ module Psych
         return false unless key_start_line && value_start_line
 
         key_start_line == value_start_line
+      end
+
+      def sequence_item_mapping_reorder_requires_whole_item?(template_node, dest_node)
+        return false unless sequence_item_mapping_node?(template_node)
+        return false unless sequence_item_mapping_node?(dest_node)
+
+        template_first_key = first_mapping_key_name(template_node)
+        dest_first_key = first_mapping_key_name(dest_node)
+
+        template_first_key && dest_first_key && template_first_key != dest_first_key
+      end
+
+      def sequence_item_mapping_node?(node)
+        node.respond_to?(:mapping?) && node.mapping? && (!node.respond_to?(:key) || node.key.nil?)
+      end
+
+      def first_mapping_key_name(node)
+        key_wrapper, = node.mapping_entries.first
+        key_wrapper&.value
       end
 
       # Emit a recursively merged node
@@ -525,14 +546,14 @@ module Psych
 
         template_items = template_value.sequence_items(comment_tracker: @template_analysis.comment_tracker)
         dest_items = dest_value.sequence_items(comment_tracker: @dest_analysis.comment_tracker)
+        next_template_by_id = build_next_node_lookup(template_items)
+        next_dest_by_id = build_next_node_lookup(dest_items)
 
-        template_items_by_key = build_sequence_item_match_map(template_items, @template_analysis)
+        sequence_matches = build_sequence_item_matches(template_items, dest_items)
         consumed_template_indices = ::Set.new
-        key_cursor = Hash.new(0)
 
-        dest_items.each do |item|
-          match_key = sequence_item_match_key(item, @dest_analysis)
-          template_info = next_sequence_item_match(template_items_by_key, match_key, key_cursor, consumed_template_indices)
+        dest_items.each_with_index do |item, dest_idx|
+          template_info = sequence_matches[dest_idx]
 
           if template_info
             template_item = template_info[:item]
@@ -540,11 +561,12 @@ module Psych
             if should_recurse?(depth) && can_merge_recursively?(template_item, item)
               emit_recursive_merge(template_item, item, depth: depth)
             elsif preference_for_pair(template_item, item) == :destination
-              emit_sequence_item(item, @dest_analysis)
+              emit_sequence_item(item, @dest_analysis, next_node: next_dest_by_id[item.object_id])
             else
               emit_sequence_item(
                 template_item,
                 @template_analysis,
+                next_node: next_template_by_id[template_item.object_id],
                 comment_source_node: item,
                 comment_analysis: @dest_analysis,
               )
@@ -554,7 +576,7 @@ module Psych
           elsif @remove_template_missing_nodes
             emit_removed_sequence_item_comments(item, @dest_analysis, depth: depth)
           else
-            emit_sequence_item(item, @dest_analysis)
+            emit_sequence_item(item, @dest_analysis, next_node: next_dest_by_id[item.object_id])
           end
         end
 
@@ -564,7 +586,147 @@ module Psych
         template_items.each_with_index do |item, idx|
           next if consumed_template_indices.include?(idx)
 
-          emit_sequence_item(item, @template_analysis)
+          emit_sequence_item(item, @template_analysis, next_node: next_template_by_id[item.object_id])
+        end
+      end
+
+      def build_sequence_item_matches(template_items, dest_items)
+        matches = {}
+        consumed_template_indices = ::Set.new
+        consumed_dest_indices = ::Set.new
+
+        # Phase 1: exact semantic matches. This is schema-agnostic and lets us
+        # pair items that are logically identical even when formatting differs
+        # (for example, scalar quoting/style differences).
+        template_items_by_key = build_sequence_item_match_map(template_items, @template_analysis)
+        key_cursor = Hash.new(0)
+
+        dest_items.each_with_index do |item, dest_idx|
+          match_key = sequence_item_match_key(item, @dest_analysis)
+          template_info = next_sequence_item_match(template_items_by_key, match_key, key_cursor, consumed_template_indices)
+          next unless template_info
+
+          matches[dest_idx] = template_info
+          consumed_template_indices << template_info[:index]
+          consumed_dest_indices << dest_idx
+        end
+
+        refined_matches = build_refined_sequence_observation_matches(
+          template_items,
+          dest_items,
+          consumed_template_indices,
+          consumed_dest_indices,
+        )
+        matches.merge!(refined_matches)
+      end
+
+      def build_refined_sequence_observation_matches(template_items, dest_items, consumed_template_indices, consumed_dest_indices)
+        # Phase 2: for composite items that are not semantically identical, infer
+        # correspondence from the data actually present in the sibling sequence.
+        # We look for the smallest shared set of scalar observations that is
+        # unique on both sides, instead of assuming any key name is globally
+        # special across all YAML documents.
+        template_infos = template_items.each_with_index.filter_map do |item, idx|
+          next if consumed_template_indices.include?(idx)
+
+          observations = sequence_item_observations(item, @template_analysis)
+          next if observations.empty?
+
+          {item: item, index: idx, observations: observations}
+        end
+        dest_infos = dest_items.each_with_index.filter_map do |item, idx|
+          next if consumed_dest_indices.include?(idx)
+
+          observations = sequence_item_observations(item, @dest_analysis)
+          next if observations.empty?
+
+          {item: item, index: idx, observations: observations}
+        end
+
+        return {} if template_infos.empty? || dest_infos.empty?
+
+        candidates = dest_infos.filter_map do |dest_info|
+          template_infos.filter_map do |template_info|
+            shared_observations = template_info[:observations] & dest_info[:observations]
+            next if shared_observations.empty?
+
+            discriminator = unique_shared_observation_subset(
+              shared_observations,
+              template_info,
+              template_infos,
+              dest_info,
+              dest_infos,
+            )
+            next unless discriminator
+
+            {
+              dest_index: dest_info[:index],
+              template_index: template_info[:index],
+              item: template_info[:item],
+              shared_count: shared_observations.length,
+              discriminator_size: discriminator.length,
+            }
+          end
+        end.flatten
+
+        return {} if candidates.empty?
+
+        consumed_template_candidate_indices = ::Set.new
+        consumed_dest_candidate_indices = ::Set.new
+
+        candidates.sort_by do |candidate|
+          [
+            -candidate[:shared_count],
+            candidate[:discriminator_size],
+            (candidate[:dest_index] - candidate[:template_index]).abs,
+            candidate[:dest_index],
+            candidate[:template_index],
+          ]
+        end.each_with_object({}) do |candidate, matches|
+          next if consumed_dest_candidate_indices.include?(candidate[:dest_index])
+          next if consumed_template_candidate_indices.include?(candidate[:template_index])
+
+          matches[candidate[:dest_index]] = {
+            item: candidate[:item],
+            index: candidate[:template_index],
+          }
+          consumed_dest_candidate_indices << candidate[:dest_index]
+          consumed_template_candidate_indices << candidate[:template_index]
+        end
+      end
+
+      def unique_shared_observation_subset(shared_observations, template_info, template_infos, dest_info, dest_infos)
+        ranked_observations = rank_sequence_mapping_observations(shared_observations, template_infos, dest_infos)
+
+        (1..ranked_observations.length).each do |subset_size|
+          ranked_observations.combination(subset_size) do |subset|
+            next unless uniquely_identified_by_observations?(subset, template_info, template_infos)
+            next unless uniquely_identified_by_observations?(subset, dest_info, dest_infos)
+
+            return subset
+          end
+        end
+
+        nil
+      end
+
+      def uniquely_identified_by_observations?(subset, target_info, infos)
+        matches = infos.select do |info|
+          subset.all? { |observation| info[:observations].include?(observation) }
+        end
+
+        matches.one? && matches.first[:index] == target_info[:index]
+      end
+
+      def rank_sequence_mapping_observations(shared_observations, template_infos, dest_infos)
+        occurrence_counts = Hash.new(0)
+
+        (template_infos + dest_infos).each do |info|
+          info[:observations].each { |observation| occurrence_counts[observation] += 1 }
+        end
+
+        shared_observations.sort_by do |path, value|
+          [occurrence_counts[[path, value]], path.length, path.join("."), value.to_s]
         end
       end
 
@@ -572,12 +734,12 @@ module Psych
       #
       # @param item [NodeWrapper] Sequence item to emit
       # @param analysis [FileAnalysis] Analysis for accessing source
-      def emit_sequence_item(item, analysis, comment_source_node: nil, comment_analysis: analysis)
+      def emit_sequence_item(item, analysis, next_node: nil, comment_source_node: nil, comment_analysis: analysis)
         return unless item.start_line && item.end_line
 
         emit_node_prelude(item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
 
-        lines = trimmed_sequence_item_lines(item, analysis)
+        lines = trimmed_sequence_item_lines(item, analysis, next_node: next_node)
         return if lines.empty?
 
         emit_node_first_line(lines.shift, item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
@@ -820,63 +982,64 @@ module Psych
         return [:scalar, item.value] if item.scalar?
         return [:alias, item.alias_anchor] if item.alias?
 
-        nested_sequence_identity = sequence_nested_item_identity(item, analysis)
-        return nested_sequence_identity if nested_sequence_identity
-
-        mapping_identity = sequence_mapping_item_identity(item, analysis)
-        return mapping_identity if mapping_identity
+        semantic_identity = sequence_item_semantic_identity(item, analysis)
+        return semantic_identity if semantic_identity
 
         [:fingerprint, sequence_item_fingerprint(item, analysis)]
       end
 
-      def sequence_mapping_item_identity(item, analysis)
-        return unless item.mapping?
+      def sequence_item_semantic_identity(item, analysis)
+        canonical = canonical_sequence_item_value(item, analysis)
+        canonical ? [:semantic, canonical] : nil
+      end
 
-        scalar_entries = item.mapping_entries(comment_tracker: analysis.comment_tracker).filter_map do |key_wrapper, value_wrapper|
-          next unless key_wrapper&.value && value_wrapper&.scalar?
+      def canonical_sequence_item_value(item, analysis)
+        # Canonicalize sequence items structurally so equality is based on YAML
+        # content, not source formatting. Mapping entry order is normalized here
+        # because YAML mappings are semantic key/value collections even when the
+        # source file preserves a presentation order.
+        return [:scalar, item.node.tag, item.value] if item.scalar?
+        return [:alias, item.alias_anchor] if item.alias?
 
-          [key_wrapper.value, value_wrapper.value]
-        end
-        return if scalar_entries.empty?
+        if item.mapping?
+          entries = item.mapping_entries(comment_tracker: analysis.comment_tracker).map do |key_wrapper, value_wrapper|
+            [key_wrapper&.value, canonical_sequence_item_value(value_wrapper, analysis)]
+          end
 
-        %w[path file pattern orcid id value name key type email given-names family-names].each do |identity_key|
-          pair = scalar_entries.find { |key, _value| key == identity_key }
-          next unless pair
-
-          return [:mapping_scalar_identity, identity_key, pair[1]] if globally_unique_sequence_mapping_key?(identity_key)
-
-          stable_auxiliary_pairs = scalar_entries.reject do |key, _value|
-            key == identity_key || ignored_auxiliary_sequence_keys_for(identity_key).include?(key)
-          end.sort_by(&:first)
-
-          return [:mapping_scalar_identity, identity_key, pair[1], stable_auxiliary_pairs] if stable_auxiliary_pairs.any?
-
-          return [:mapping_scalar_identity, identity_key, pair[1]]
+          return [:mapping, entries.sort_by { |key, value| [key.to_s, value.inspect] }]
         end
 
-        return [:mapping_scalar_identity, scalar_entries.first[0], scalar_entries.first[1]] if scalar_entries.one?
+        if item.sequence?
+          items = item.sequence_items(comment_tracker: analysis.comment_tracker).map do |child|
+            canonical_sequence_item_value(child, analysis)
+          end
+
+          return [:sequence, items]
+        end
 
         nil
       end
 
-      def globally_unique_sequence_mapping_key?(identity_key)
-        %w[path file pattern value email orcid].include?(identity_key)
-      end
+      def sequence_item_observations(item, analysis, path = [])
+        return ::Set[[path, item.value]] if item.scalar?
+        return ::Set[[path, item.alias_anchor]] if item.alias?
 
-      def ignored_auxiliary_sequence_keys_for(identity_key)
-        ignored = ["value"]
-        ignored << "type" if identity_key == "value"
-        ignored
-      end
+        if item.mapping?
+          return item.mapping_entries(comment_tracker: analysis.comment_tracker).each_with_object(::Set.new) do |(key_wrapper, value_wrapper), observations|
+            next unless key_wrapper&.value
 
-      def sequence_nested_item_identity(item, analysis)
-        return unless item.sequence?
+            child_path = path + [key_wrapper.value]
+            observations.merge(sequence_item_observations(value_wrapper, analysis, child_path)) if value_wrapper
+          end
+        end
 
-        nested_items = item.sequence_items(comment_tracker: analysis.comment_tracker)
-        return if nested_items.empty?
+        if item.sequence?
+          return item.sequence_items(comment_tracker: analysis.comment_tracker).each_with_index.each_with_object(::Set.new) do |(child, idx), observations|
+            observations.merge(sequence_item_observations(child, analysis, path + [idx]))
+          end
+        end
 
-        first_item = nested_items.first
-        [:nested_sequence_identity, sequence_item_match_key(first_item, analysis)]
+        ::Set.new
       end
 
       def emit_removed_nested_sequence_item_comments(item, analysis, depth:)
@@ -892,8 +1055,9 @@ module Psych
         [:raw_lines, trimmed_sequence_item_lines(item, analysis)]
       end
 
-      def trimmed_sequence_item_lines(item, analysis)
-        lines = (item.start_line..item.end_line).map { |line_num| analysis.line_at(line_num) }.compact
+      def trimmed_sequence_item_lines(item, analysis, next_node: nil)
+        end_line = sequence_item_end_line(item, analysis, next_node: next_node)
+        lines = (item.start_line..end_line).map { |line_num| analysis.line_at(line_num) }.compact
         return lines if lines.empty?
 
         first_content_line = lines.find { |line| !line.strip.empty? }
@@ -908,8 +1072,17 @@ module Psych
         end
 
         trimmed_lines = cutoff_index ? lines.take(cutoff_index) : lines
-        trimmed_lines.pop while trimmed_lines.any? && trimmed_lines.last.strip.empty?
+        trimmed_lines.pop while next_node.nil? && trimmed_lines.any? && trimmed_lines.last.strip.empty?
         trimmed_lines
+      end
+
+      def sequence_item_end_line(item, analysis, next_node: nil)
+        return item.end_line unless next_node
+
+        next_start_line = effective_start_line(next_node, analysis)
+        return item.end_line unless next_start_line
+
+        [item.end_line, next_start_line - 1].min
       end
 
       def build_next_node_lookup(nodes)
@@ -949,6 +1122,8 @@ module Psych
 
       def emit_document_postlude(analysis, fallback_node: nil)
         augmenter = document_comment_augmenter_for(analysis)
+        return if fallback_node.nil?
+
         regions = document_trailing_regions_for(augmenter, analysis, fallback_node)
 
         if regions.empty?

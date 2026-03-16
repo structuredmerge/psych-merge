@@ -58,6 +58,17 @@ Please file a bug if you notice a violation of semantic versioning.
   when searching upward for comments. `emit_node` now emits the blank line separator
   between comments and the node when one existed in the original source.
   Reported via kettle-jem self-test against `.github/FUNDING.yml`.
+- Fix recursive sequence emission so a template or destination item no longer
+  swallows the next sibling's leading comment block from its physical line
+  range, preventing duplicated workflow-style section comments when inserting
+  template-only items.
+- Fix observation-based recursive sequence matching for composite items such as
+  nested sequences, allowing stable inner scalars to match outer siblings 1:1
+  so comment ownership and removal-mode promotion stay attached to the correct
+  item.
+- Fix document-level comment-only destination headers so, when the preferred
+  document has no nodes, the header is emitted once as a prelude instead of
+  being duplicated again as a trailing postlude after template-only additions.
 
 ### Deprecated
 

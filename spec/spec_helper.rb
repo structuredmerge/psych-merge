@@ -2,7 +2,6 @@
 
 # External RSpec & related config
 require "kettle/test/rspec"
-require "ast/merge/rspec"
 
 # Internal ENV config
 require_relative "config/debug"

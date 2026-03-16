@@ -150,7 +150,65 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result.scan(/strategy: raw_copy/).size).to eq(1)
       end
 
-      it "matches citation-style author entries by orcid before mutable email fields" do
+      it "matches sequence mapping items by unique shared scalar observations instead of hard-coded key names" do
+        template = <<~YAML
+          runtimes:
+            - engine: ruby
+              channel: current
+              command: bundle exec rspec
+
+            - engine: truffleruby
+              channel: current
+              command: bundle exec rspec
+        YAML
+        dest = <<~YAML
+          runtimes:
+            - engine: ruby
+              channel: current
+              command: bin/spec # destination inline
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/engine: ruby/).size).to eq(1)
+        expect(result.scan(/engine: truffleruby/).size).to eq(1)
+        expect(result).to include("command: bundle exec rspec # destination inline")
+      end
+
+      it "treats semantically identical mapping items as the same item even when key order differs" do
+        template = <<~YAML
+          plugins:
+            - engine: ruby
+              channel: current
+              command: bundle exec rspec
+        YAML
+        dest = <<~YAML
+          plugins:
+            - command: bundle exec rspec
+              channel: current
+              engine: ruby
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/engine: ruby/).size).to eq(1)
+        expect(result.scan(/channel: current/).size).to eq(1)
+        expect(result.scan(/command: bundle exec rspec/).size).to eq(1)
+      end
+
+      it "matches citation-style author entries by shared stable observations when mutable fields change" do
         template = <<~YAML
           authors:
             - given-names: "Peter H."
@@ -180,6 +238,88 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include('given-names: "Peter H."')
         expect(result).to include('email: "floss@glatzo.com"')
         expect(result).not_to include("Peter Hurn")
+      end
+
+      it "matches workflow matrix items without treating ruby as a globally special key" do
+        template = <<~YAML
+          matrix:
+            include:
+              # Ruby 3.4
+              - ruby: ruby
+                appraisal: current
+                exec_cmd: rake test
+                gemfile: Appraisal.root
+                rubygems: latest
+                bundler: latest
+
+              # TruffleRuby current
+              - ruby: truffleruby
+                appraisal: current
+                exec_cmd: rake test
+                gemfile: Appraisal.root
+                rubygems: default
+                bundler: default
+        YAML
+        dest = <<~YAML
+          matrix:
+            include:
+              # Ruby 3.4
+              - ruby: ruby
+                appraisal: current
+                exec_cmd: rake test
+                gemfile: Appraisal.root
+                rubygems: latest
+                bundler: latest
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/- ruby: ruby$/).size).to eq(1)
+        expect(result.scan(/- ruby: truffleruby$/).size).to eq(1)
+      end
+
+      it "does not duplicate a later sibling comment block when inserting template-only sequence items" do
+        template = <<~YAML
+          matrix:
+            include:
+              # Ruby 3.4
+              - ruby: ruby
+                appraisal: current
+
+              # TruffleRuby current
+              - ruby: truffleruby
+                appraisal: current
+
+              # JRuby current
+              - ruby: jruby
+                appraisal: current
+        YAML
+        dest = <<~YAML
+          matrix:
+            include:
+              # Ruby 3.4
+              - ruby: ruby
+                appraisal: current
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/# TruffleRuby current/).size).to eq(1)
+        expect(result.scan(/# JRuby current/).size).to eq(1)
+        expect(result.scan(/- ruby: truffleruby$/).size).to eq(1)
+        expect(result.scan(/- ruby: jruby$/).size).to eq(1)
       end
     end
 
