@@ -69,6 +69,10 @@ Please file a bug if you notice a violation of semantic versioning.
 - Fix document-level comment-only destination headers so, when the preferred
   document has no nodes, the header is emitted once as a prelude instead of
   being duplicated again as a trailing postlude after template-only additions.
+- Fix wrapped mapping / sequence value line ranges so a node no longer claims a
+  following sibling's leading comment block in `.kettle-jem.yml`-style files,
+  preventing duplicated commented sections when `patterns:` is followed by a
+  commented `files:` section.
 
 ### Deprecated
 

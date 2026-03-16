@@ -594,6 +594,82 @@ RSpec.describe Psych::Merge::SmartMerger do
 
         expect(merger.merge).to eq(dest)
       end
+
+      it "does not duplicate a commented section that follows a sequence in kettle-jem config merges" do
+        template = <<~YAML
+          # Default merge options
+          defaults:
+            preference: "template"
+            add_template_only_nodes: true
+            freeze_token: "kettle-jem"
+
+          # Token replacement values.
+          #
+          # General rules:
+          tokens:
+            forge:
+              gh_user: ""
+
+          # Glob patterns evaluated in order (first match wins)
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files:
+            ".git-hooks":
+              commit-msg:
+                strategy: accept_template
+                file_type: ruby
+        YAML
+        dest = <<~YAML
+          # Default merge options
+          defaults:
+            preference: "template"
+            add_template_only_nodes: true
+            freeze_token: "kettle-jem"
+
+          # Token replacement values.
+          #
+          # General rules:
+          #   - Empty strings are treated as unset.
+          #   - Use the bare identifier/slug/handle expected by the inline comment.
+          #   - Do NOT paste full URLs unless the comment explicitly says to.
+          #
+          # Tip:
+          #   The author fields in a newly created destination config are normally seeded
+          #   from the gemspec via safe derivation. After that, destination values win.
+          tokens:
+            forge:
+              gh_user: "pboling"
+
+          # Glob patterns evaluated in order (first match wins)
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files:
+            ".git-hooks":
+              commit-msg:
+                strategy: accept_template
+                file_type: ruby
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/# Glob patterns evaluated in order \(first match wins\)/).size).to eq(1)
+        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
+        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+      end
     end
   end
 

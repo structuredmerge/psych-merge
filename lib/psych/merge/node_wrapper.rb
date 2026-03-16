@@ -39,7 +39,18 @@ module Psych
       # @param leading_comments [Array<Hash>] Comments before this node
       # @param inline_comment [Hash, nil] Inline comment on the node's line
       # @param key [String, nil] Key name if this is a mapping value
-      def initialize(node, lines:, leading_comments: [], inline_comment: nil, key: nil, comment_tracker: nil)
+      def initialize(
+        node,
+        lines:,
+        leading_comments: [],
+        inline_comment: nil,
+        key: nil,
+        comment_tracker: nil,
+        next_sibling_line_num: nil,
+        next_sibling_leading_comments: nil,
+        end_line_limit: nil,
+        **_options
+      )
         @node = node
         @lines = lines
         @leading_comments = leading_comments
@@ -67,6 +78,8 @@ module Psych
         # See regression test: "does not duplicate keys when destination adds a new nested mapping"
         @start_line = node.start_line + 1 if node.respond_to?(:start_line) && node.start_line
         @end_line = node.end_line if node.respond_to?(:end_line) && node.end_line
+
+        clamp_end_line_to_next_sibling!(next_sibling_line_num, next_sibling_leading_comments, end_line_limit)
 
         # Handle edge case where end_line might be before start_line
         @end_line = @start_line if @start_line && @end_line && @end_line < @start_line
@@ -140,7 +153,13 @@ module Psych
           break unless key_node && value_node
 
           key_wrapper = wrap_node(key_node, comment_tracker)
-          value_wrapper = wrap_node(value_node, comment_tracker, key: extract_key_name(key_node))
+          value_wrapper = wrap_node(
+            value_node,
+            comment_tracker,
+            key: extract_key_name(key_node),
+            next_sibling_node: children[i + 2],
+            end_line_limit: @end_line,
+          )
 
           entries << [key_wrapper, value_wrapper]
           i += 2
@@ -155,7 +174,14 @@ module Psych
       def sequence_items(comment_tracker: nil)
         return [] unless sequence?
 
-        @node.children.map { |child| wrap_node(child, comment_tracker) }
+        @node.children.each_with_index.map do |child, index|
+          wrap_node(
+            child,
+            comment_tracker,
+            next_sibling_node: @node.children[index + 1],
+            end_line_limit: @end_line,
+          )
+        end
       end
 
       # Get the scalar value
@@ -274,17 +300,31 @@ module Psych
       end
 
       def wrap_children(child_nodes, comment_tracker)
-        child_nodes.map { |child| wrap_node(child, comment_tracker) }
+        child_nodes.each_with_index.map do |child, index|
+          wrap_node(
+            child,
+            comment_tracker,
+            next_sibling_node: child_nodes[index + 1],
+            end_line_limit: @end_line,
+          )
+        end
       end
 
-      def wrap_node(node, comment_tracker, key: nil)
+      def wrap_node(node, comment_tracker, key: nil, next_sibling_node: nil, end_line_limit: nil)
         leading = []
         inline = nil
+        next_sibling_line_num = nil
+        next_sibling_leading_comments = nil
 
         if comment_tracker && node.respond_to?(:start_line) && node.start_line
           line_num = node.start_line + 1
           leading = comment_tracker.leading_comments_before(line_num)
           inline = comment_tracker.inline_comment_at(line_num)
+
+          if next_sibling_node&.respond_to?(:start_line) && next_sibling_node.start_line
+            next_sibling_line_num = next_sibling_node.start_line + 1
+            next_sibling_leading_comments = comment_tracker.leading_comments_before(next_sibling_line_num)
+          end
         end
 
         NodeWrapper.new(
@@ -294,7 +334,21 @@ module Psych
           inline_comment: inline,
           key: key,
           comment_tracker: comment_tracker,
+          next_sibling_line_num: next_sibling_line_num,
+          next_sibling_leading_comments: next_sibling_leading_comments,
+          end_line_limit: end_line_limit,
         )
+      end
+
+      def clamp_end_line_to_next_sibling!(next_sibling_line_num, next_sibling_leading_comments, end_line_limit)
+        return unless @start_line && @end_line
+
+        if next_sibling_line_num
+          boundary_line = next_sibling_leading_comments&.first&.dig(:line) || next_sibling_line_num
+          @end_line = [@end_line, boundary_line - 1].min if boundary_line && boundary_line > @start_line
+        end
+
+        @end_line = [@end_line, end_line_limit].min if end_line_limit
       end
 
       def build_comment_region(kind, comments)
