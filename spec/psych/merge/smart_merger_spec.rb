@@ -150,6 +150,44 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result.scan(/strategy: raw_copy/).size).to eq(1)
       end
 
+      it "does not duplicate a trailing commented mapping section after an identical sequence item" do
+        template = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+
+          # To override specific files, add entries like:
+          #
+          # files:
+          #   README.md:
+          #     strategy: accept_template
+        YAML
+        dest = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
+      end
+
       it "matches sequence mapping items by unique shared scalar observations instead of hard-coded key names" do
         template = <<~YAML
           runtimes:
