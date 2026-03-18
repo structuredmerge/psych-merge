@@ -219,6 +219,58 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include("command: bundle exec rspec # destination inline")
       end
 
+      it "preserves blank lines between recursively merged nested sequence items" do
+        template = <<~YAML
+          jobs:
+            coverage:
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v6
+
+                - name: Setup Ruby
+                  uses: ruby/setup-ruby@v1
+
+                - name: Run tests
+                  run: bundle exec rspec
+        YAML
+
+        merger = described_class.new(
+          template,
+          template,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+        )
+
+        expect(merger.merge).to eq(template)
+      end
+
+      it "preserves blank lines before comment-led recursively merged nested sequence items" do
+        template = <<~YAML
+          jobs:
+            coverage:
+              steps:
+                - name: Attempt 1
+                  run: bundle exec appraisal install
+                  continue-on-error: true
+
+                # Retry if the first install failed.
+                - name: Attempt 2
+                  if: ${{ failure() }}
+                  run: bundle exec appraisal install
+        YAML
+
+        merger = described_class.new(
+          template,
+          template,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+        )
+
+        expect(merger.merge).to eq(template)
+      end
+
       it "treats semantically identical mapping items as the same item even when key order differs" do
         template = <<~YAML
           plugins:

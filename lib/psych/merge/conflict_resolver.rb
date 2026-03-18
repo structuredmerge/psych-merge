@@ -608,6 +608,7 @@ module Psych
 
         sequence_matches = build_sequence_item_matches(template_items, dest_items)
         consumed_template_indices = ::Set.new
+        prev_dest_end_line = nil
 
         # Pre-compute position-aware trailing groups for template-only sequence items
         if @add_template_only_nodes
@@ -629,15 +630,23 @@ module Psych
         end
 
         dest_items.each_with_index do |item, dest_idx|
+          if prev_dest_end_line
+            effective_start = effective_start_line(item, @dest_analysis)
+            emit_interstitial_blank_lines(prev_dest_end_line + 1, effective_start - 1, @dest_analysis) if effective_start
+          end
+
           template_info = sequence_matches[dest_idx]
+          next_dest_node = next_dest_by_id[item.object_id]
+          emitted_recursively = false
 
           if template_info
             template_item = template_info[:item]
 
             if should_recurse?(depth) && can_merge_recursively?(template_item, item)
+              emitted_recursively = true
               emit_recursive_merge(template_item, item, depth: depth)
             elsif preference_for_pair(template_item, item) == :destination
-              emit_sequence_item(item, @dest_analysis, next_node: next_dest_by_id[item.object_id])
+              emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
             else
               emit_sequence_item(
                 template_item,
@@ -650,9 +659,16 @@ module Psych
 
             consumed_template_indices << template_info[:index]
           elsif @remove_template_missing_nodes
+            emitted_recursively = should_recurse?(depth) && (item.mapping? || item.sequence?)
             emit_removed_sequence_item_comments(item, @dest_analysis, depth: depth)
           else
-            emit_sequence_item(item, @dest_analysis, next_node: next_dest_by_id[item.object_id])
+            emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
+          end
+
+          prev_dest_end_line = if emitted_recursively
+            effective_end_line(item, @dest_analysis, next_node: next_dest_node)
+          else
+            sequence_item_end_line(item, @dest_analysis, next_node: next_dest_node)
           end
 
           # After each dest item, flush any ready trailing groups (deferred approach)
@@ -1185,7 +1201,8 @@ module Psych
         end_line = node.end_line
         return end_line unless next_node && next_node.respond_to?(:start_line) && next_node.start_line
 
-        boundary = next_node.start_line - 1
+        next_effective_start = effective_start_line(next_node, analysis)
+        boundary = (next_effective_start || next_node.start_line) - 1
         if analysis.respond_to?(:comment_tracker)
           boundary -= 1 while boundary >= 1 && analysis.comment_tracker.blank_line?(boundary)
         end

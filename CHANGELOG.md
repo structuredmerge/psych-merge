@@ -74,6 +74,9 @@ Please file a bug if you notice a violation of semantic versioning.
   following sibling's leading comment block in `.kettle-jem.yml`-style files,
   preventing duplicated commented sections when `patterns:` is followed by a
   commented `files:` section.
+- Fix recursive YAML sequence emission so identity merges preserve blank lines
+  between workflow-style items, including separators that precede comment-led
+  sibling items.
 
 ### Deprecated
 
