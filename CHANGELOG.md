@@ -34,6 +34,7 @@ Please file a bug if you notice a violation of semantic versioning.
   removed as dead code.
 - Preserved normalized comment regions and attachments through YAML emission and merge paths while keeping document boundaries, recursive comment-heavy fixtures, and destination-leading / inline ownership stable under template preference
 - Clarified the YAML removal-mode baseline so `remove_template_missing_nodes: true` preserves or promotes comment regions for removed destination-only mappings instead of silently dropping them
+- Adopted `Ast::Merge::TrailingGroups::DestIterate` plus shared deferred-flush ordering for mappings and sequence items so template-only YAML additions keep their template-relative position even when destination keys or list items are reordered
 
 ### Fixed
 
