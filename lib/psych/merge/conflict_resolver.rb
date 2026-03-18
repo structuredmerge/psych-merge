@@ -22,6 +22,7 @@ module Psych
     #
     # @see Ast::Merge::ConflictResolverBase
     class ConflictResolver < Ast::Merge::ConflictResolverBase
+      include ::Ast::Merge::TrailingGroups::DestIterate
       # Creates a new ConflictResolver
       #
       # @param template_analysis [FileAnalysis] Analyzed template file
@@ -155,6 +156,30 @@ module Psych
         consumed_template_indices = ::Set.new
         sig_cursor = Hash.new(0)
 
+        # Pre-compute position-aware trailing groups for template-only nodes.
+        dest_sigs = ::Set.new
+        dest_nodes.each { |n| sig = @dest_analysis.generate_signature(n); dest_sigs << sig if sig }
+        refined_template_ids = ::Set.new(@refined_matches.keys.map(&:object_id))
+
+        trailing_groups, all_matched_template_indices = build_dest_iterate_trailing_groups(
+          template_nodes: template_nodes,
+          dest_sigs: dest_sigs,
+          signature_for: ->(node) { @template_analysis.generate_signature(node) },
+          refined_template_ids: refined_template_ids,
+          add_template_only_nodes: @add_template_only_nodes,
+        )
+
+
+        # Emit template-only nodes that precede the first matched template node
+        emit_prefix_trailing_group(trailing_groups, consumed_template_indices) do |info|
+          next if freeze_node?(info[:node])
+          emit_node(
+            info[:node],
+            @template_analysis,
+            next_node: next_template_by_id[info[:node].object_id],
+          )
+        end
+
         # Track previous node end_line to preserve inter-node blank lines.
         # Blank lines between top-level YAML sections (e.g., between `name:` and `on:`)
         # are not part of any node or comment — they are purely visual separators.
@@ -196,6 +221,8 @@ module Psych
             next
           end
 
+          matched_template_index = nil
+
           # Check for signature match first
           if dest_sig && template_by_sig[dest_sig]
             # Find the next unconsumed template node with this signature
@@ -229,6 +256,7 @@ module Psych
 
               consumed_template_indices << template_info[:index]
               sig_cursor[dest_sig] = cursor + 1
+              matched_template_index = template_info[:index]
             else
               # All template copies consumed — destination-only duplicate
               if @remove_template_missing_nodes
@@ -247,6 +275,18 @@ module Psych
               template_by_sig[template_sig].each do |info|
                 unless consumed_template_indices.include?(info[:index])
                   consumed_template_indices << info[:index]
+                  matched_template_index = info[:index]
+                  break
+                end
+              end
+            end
+
+            # If we couldn't find the index via sig map, find it by identity
+            if matched_template_index.nil?
+              template_nodes.each_with_index do |tn, idx|
+                if tn.equal?(template_node) && !consumed_template_indices.include?(idx)
+                  consumed_template_indices << idx
+                  matched_template_index = idx
                   break
                 end
               end
@@ -272,24 +312,36 @@ module Psych
               emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
           end
-        end
 
-        # Second pass: Add template-only nodes if configured
-        if @add_template_only_nodes
-          template_nodes.each_with_index do |template_node, idx|
-            # Skip if consumed by a match in the first pass
-            next if consumed_template_indices.include?(idx)
-
-            # Skip freeze blocks from template
-            next if freeze_node?(template_node)
-
-            # Add template-only node
+          # After each dest node, flush any trailing groups that are now ready.
+          # A group anchored at index K is ready when ALL matched template indices
+          # with values 0..K have been consumed.  This prevents premature emission
+          # when the dest reorders matched items relative to the template.
+          flush_ready_trailing_groups(
+            trailing_groups: trailing_groups,
+            matched_indices: all_matched_template_indices,
+            consumed_indices: consumed_template_indices,
+          ) do |info|
+            next if freeze_node?(info[:node])
             emit_node(
-              template_node,
+              info[:node],
               @template_analysis,
-              next_node: next_template_by_id[template_node.object_id],
+              next_node: next_template_by_id[info[:node].object_id],
             )
           end
+        end
+
+        # Safety net: emit any remaining trailing groups whose anchor was never consumed
+        emit_remaining_trailing_groups(
+          trailing_groups: trailing_groups,
+          consumed_indices: consumed_template_indices,
+        ) do |info|
+          next if freeze_node?(info[:node])
+          emit_node(
+            info[:node],
+            @template_analysis,
+            next_node: next_template_by_id[info[:node].object_id],
+          )
         end
 
         if emit_destination_postlude
@@ -299,6 +351,11 @@ module Psych
             fallback_node: document_nodes.last,
           )
         end
+      end
+
+      # Override hook: freeze nodes are treated as matched for trailing group purposes.
+      def trailing_group_node_matched?(node, _signature)
+        freeze_node?(node)
       end
 
       def preferred_document_context(template_nodes, dest_nodes)
@@ -552,6 +609,25 @@ module Psych
         sequence_matches = build_sequence_item_matches(template_items, dest_items)
         consumed_template_indices = ::Set.new
 
+        # Pre-compute position-aware trailing groups for template-only sequence items
+        if @add_template_only_nodes
+          matched_template_indices_from_seq = ::Set.new(sequence_matches.values.map { |info| info[:index] })
+          seq_trailing_groups, seq_all_matched_indices = build_trailing_groups(
+            template_nodes: template_items,
+            matched_predicate: ->(_item, idx) { matched_template_indices_from_seq.include?(idx) },
+            entry_builder: ->(item, idx) { {item: item, node: item, index: idx} },
+          )
+        else
+          seq_trailing_groups = {}
+          seq_all_matched_indices = ::Set.new
+        end
+
+
+        # Emit template-only items that precede the first matched template item
+        emit_prefix_trailing_group(seq_trailing_groups, consumed_template_indices) do |info|
+          emit_sequence_item(info[:item], @template_analysis, next_node: next_template_by_id[info[:item].object_id])
+        end
+
         dest_items.each_with_index do |item, dest_idx|
           template_info = sequence_matches[dest_idx]
 
@@ -578,15 +654,23 @@ module Psych
           else
             emit_sequence_item(item, @dest_analysis, next_node: next_dest_by_id[item.object_id])
           end
+
+          # After each dest item, flush any ready trailing groups (deferred approach)
+          flush_ready_trailing_groups(
+            trailing_groups: seq_trailing_groups,
+            matched_indices: seq_all_matched_indices,
+            consumed_indices: consumed_template_indices,
+          ) do |info|
+            emit_sequence_item(info[:item], @template_analysis, next_node: next_template_by_id[info[:item].object_id])
+          end
         end
 
-        # If add_template_only_nodes, add template items not in destination
-        return unless @add_template_only_nodes
-
-        template_items.each_with_index do |item, idx|
-          next if consumed_template_indices.include?(idx)
-
-          emit_sequence_item(item, @template_analysis, next_node: next_template_by_id[item.object_id])
+        # Safety net: emit any remaining trailing groups
+        emit_remaining_trailing_groups(
+          trailing_groups: seq_trailing_groups,
+          consumed_indices: consumed_template_indices,
+        ) do |info|
+          emit_sequence_item(info[:item], @template_analysis, next_node: next_template_by_id[info[:item].object_id])
         end
       end
 
