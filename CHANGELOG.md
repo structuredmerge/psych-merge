@@ -24,6 +24,7 @@ Please file a bug if you notice a violation of semantic versioning.
 
 ### Changed
 
+- Adopted the shared `Ast::Merge::Layout` contract for YAML document gaps, including shared layout compliance coverage over top-level mapping/sequence ownership
 - **BREAKING**: `ConflictResolver#merge_nodes_to_emitter` signature simplified to
   `merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)`.
   Removed `processed_template_sigs`, `processed_dest_sigs`, and `dest_by_sig`
