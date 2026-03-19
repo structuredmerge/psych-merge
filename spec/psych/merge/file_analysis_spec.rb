@@ -349,6 +349,42 @@ RSpec.describe Psych::Merge::FileAnalysis do
     end
   end
 
+  describe "shared layout compliance", :yaml_parsing do
+    let(:yaml) do
+      <<~YAML
+
+        alpha: one
+
+
+        beta: two
+
+      YAML
+    end
+
+    let(:analysis) { described_class.new(yaml) }
+    let(:first_entry) { analysis.statements.first }
+    let(:layout_attachment) { analysis.layout_attachment_for(first_entry) }
+    let(:layout_augmenter) { analysis.layout_augmenter }
+
+    it_behaves_like "Ast::Merge::Layout::Attachment" do
+      let(:expected_attachment_owner) { first_entry }
+      let(:expected_leading_gap_kind) { :preamble }
+      let(:expected_trailing_gap_kind) { :interstitial }
+      let(:expected_gap_ranges) { [1..1, 3..4] }
+      let(:expected_leading_controls_output) { true }
+      let(:expected_trailing_controls_output) { false }
+    end
+
+    it_behaves_like "Ast::Merge::Layout::Augmenter" do
+      let(:augmenter_owner) { first_entry }
+      let(:expected_preamble_range) { 1..1 }
+      let(:expected_postlude_range) { 6..6 }
+      let(:expected_interstitial_ranges) { [3..4] }
+      let(:expected_owner_leading_gap_kind) { :preamble }
+      let(:expected_owner_trailing_gap_kind) { :interstitial }
+    end
+  end
+
   describe "#root_mapping_entries" do
     it "returns mapping entries from root" do
       yaml = <<~YAML

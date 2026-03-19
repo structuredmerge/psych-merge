@@ -719,7 +719,9 @@ module Psych
         end
 
         dest_items.each_with_index do |item, dest_idx|
-          if prev_dest_end_line
+          removing_destination_only_item = @remove_template_missing_nodes && !sequence_matches.key?(dest_idx)
+
+          if prev_dest_end_line && !removing_destination_only_item
             effective_start = effective_start_line(item, @dest_analysis)
             emit_interstitial_blank_lines(prev_dest_end_line + 1, effective_start - 1, @dest_analysis) if effective_start
           end
@@ -754,7 +756,10 @@ module Psych
             emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
           end
 
-          prev_dest_end_line = if emitted_recursively
+          prev_dest_end_line = if removing_destination_only_item
+            next_effective_start = effective_start_line(next_dest_node, @dest_analysis)
+            next_effective_start ? next_effective_start - 1 : nil
+          elsif emitted_recursively
             effective_end_line(item, @dest_analysis, next_node: next_dest_node)
           else
             sequence_item_end_line(item, @dest_analysis, next_node: next_dest_node)
