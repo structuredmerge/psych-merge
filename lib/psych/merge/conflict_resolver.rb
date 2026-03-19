@@ -350,6 +350,11 @@ module Psych
             document_analysis,
             fallback_node: document_nodes.last,
           )
+          emit_supplemental_document_postlude(
+            template_nodes: template_nodes,
+            dest_nodes: dest_nodes,
+            preferred_analysis: document_analysis,
+          )
         end
       end
 
@@ -362,6 +367,90 @@ module Psych
         return [@template_analysis, template_nodes] if default_preference == :template
 
         [@dest_analysis, dest_nodes]
+      end
+
+      def nonpreferred_document_context(template_nodes, dest_nodes)
+        return [@dest_analysis, dest_nodes] if default_preference == :template
+
+        [@template_analysis, template_nodes]
+      end
+
+      def emit_supplemental_document_postlude(template_nodes:, dest_nodes:, preferred_analysis:)
+        return unless emit_nonpreferred_document_postlude?
+
+        supplemental_analysis, supplemental_nodes = nonpreferred_document_context(template_nodes, dest_nodes)
+        return unless supplemental_analysis && supplemental_nodes.any?
+
+        preferred_nodes = preferred_analysis.equal?(@template_analysis) ? template_nodes : dest_nodes
+        preferred_regions = document_trailing_regions_for(
+          document_comment_augmenter_for(preferred_analysis),
+          preferred_analysis,
+          preferred_nodes.last,
+        )
+        supplemental_regions = document_trailing_regions_for(
+          document_comment_augmenter_for(supplemental_analysis),
+          supplemental_analysis,
+          supplemental_nodes.last,
+        )
+        unique_regions = unique_document_regions(supplemental_regions, excluding: preferred_regions)
+        return if unique_regions.empty?
+
+        emit_nonpreferred_document_postlude_regions(
+          unique_regions,
+          analysis: supplemental_analysis,
+          fallback_node: supplemental_nodes.last,
+          emitted_preferred_regions: preferred_regions.any?,
+        )
+      end
+
+      def emit_nonpreferred_document_postlude?
+        return !@remove_template_missing_nodes if default_preference == :template
+
+        @add_template_only_nodes
+      end
+
+      def emit_nonpreferred_document_postlude_regions(regions, analysis:, fallback_node:, emitted_preferred_regions:)
+        if emitted_preferred_regions
+          @emitter.emit_blank_line
+        else
+          last_content_line = effective_end_line(fallback_node, analysis)
+          first_region = regions.first
+          if last_content_line && first_region.respond_to?(:start_line) && first_region.start_line
+            emit_interstitial_blank_lines(last_content_line + 1, first_region.start_line - 1, analysis)
+          end
+        end
+
+        previous_end_line = nil
+        regions.each do |region|
+          if previous_end_line && region.respond_to?(:start_line) && region.start_line
+            emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
+          end
+
+          @emitter.emit_comment_region(region, source_lines: analysis.lines)
+          previous_end_line = region.end_line if region.respond_to?(:end_line)
+        end
+      end
+
+      def unique_document_regions(regions, excluding: [])
+        seen = {}
+        Array(excluding).each do |region|
+          key = document_region_key(region)
+          seen[key] = true if key
+        end
+
+        Array(regions).each_with_object([]) do |region, unique|
+          key = document_region_key(region)
+          next if key && seen[key]
+
+          seen[key] = true if key
+          unique << region
+        end
+      end
+
+      def document_region_key(region)
+        return unless region
+
+        [region.kind, region.normalized_content.to_s]
       end
 
       def emit_preferred_node(template_node, dest_node, next_template_node: nil, next_dest_node: nil)

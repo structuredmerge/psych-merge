@@ -49,6 +49,10 @@ Please file a bug if you notice a violation of semantic versioning.
   postlude comment regions and matched mapping-entry preludes are emitted from
   the template side instead of being dropped or replaced by destination-only
   boundaries in `.kettle-jem.yml`-style files
+- Fix destination-preference document postlude emission so template-only
+  trailing footer comment blocks (such as the instructional footer in
+  `.kettle-jem.yml`-style files) are preserved when
+  `add_template_only_nodes: true`
 - Fix flow sequence duplication in recursive merge. YAML entries with flow sequence
   values (e.g., `github: [pboling]`) were duplicated because `can_merge_recursively?`
   returned `true` for sequences, causing `emit_recursive_merge` to emit the key line,

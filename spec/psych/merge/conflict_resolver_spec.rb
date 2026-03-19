@@ -507,6 +507,49 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml.index("template_only: added")).to be < yaml.index("# Destination footer")
         expect(yaml.scan("Destination footer").count).to eq(1)
       end
+
+      it "adds template-only footer comments when destination preference keeps structural values" do
+        template = <<~YAML
+          defaults:
+            preference: template
+          files: {}
+
+          # To override specific files, add entries like:
+          #
+          # files:
+          #   README.md:
+          #     strategy: accept_template
+        YAML
+        dest = <<~YAML
+          defaults:
+            preference: destination
+          files: {}
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        yaml = result.to_yaml
+
+        expect(yaml).to include("defaults:\n  preference: destination")
+        expect(yaml).to end_with(<<~YAML)
+
+          # To override specific files, add entries like:
+          #
+          # files:
+          #   README.md:
+          #     strategy: accept_template
+        YAML
+      end
     end
 
     context "with recursive merge and inline key comments" do
