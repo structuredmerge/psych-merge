@@ -190,6 +190,7 @@ module Psych
         dest_nodes.each do |dest_node|
           next_dest_node = next_dest_by_id[dest_node.object_id]
           dest_sig = @dest_analysis.generate_signature(dest_node)
+          effective_dest_end_line = effective_end_line(dest_node, @dest_analysis, next_node: next_dest_node)
 
           # Preserve inter-node blank lines from destination
           if prev_end_line && dest_node.respond_to?(:start_line) && dest_node.start_line
@@ -207,21 +208,15 @@ module Psych
             end
           end
 
-          # Update tracking for the current node's end line
-          effective_dest_end_line = effective_end_line(dest_node, @dest_analysis, next_node: next_dest_node)
-          if effective_dest_end_line
-            prev_end_line = effective_dest_end_line
-          elsif dest_node.respond_to?(:end_line) && dest_node.end_line
-            prev_end_line = dest_node.end_line
-          end
-
           # Freeze blocks from destination are always preserved
           if freeze_node?(dest_node)
             emit_freeze_block(dest_node)
+            prev_end_line = preferred_emitted_end_line(dest_node, effective_dest_end_line)
             next
           end
 
           matched_template_index = nil
+          emitted_dest_node = true
 
           # Check for signature match first
           if dest_sig && template_by_sig[dest_sig]
@@ -261,6 +256,9 @@ module Psych
               # All template copies consumed — destination-only duplicate
               if @remove_template_missing_nodes
                 emit_removed_destination_node_comments(dest_node, @dest_analysis)
+                emitted_dest_node = false
+              elsif redundant_destination_duplicate?(dest_node, candidates)
+                emitted_dest_node = false
               else
                 emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
               end
@@ -308,9 +306,16 @@ module Psych
             # If remove_template_missing_nodes is enabled, skip this node (remove it)
             if @remove_template_missing_nodes
               emit_removed_destination_node_comments(dest_node, @dest_analysis)
+              emitted_dest_node = false
             else
               emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
+          end
+
+          prev_end_line = if emitted_dest_node
+            preferred_emitted_end_line(dest_node, effective_dest_end_line)
+          else
+            skipped_destination_node_boundary(next_dest_node, @dest_analysis)
           end
 
           # After each dest node, flush any trailing groups that are now ready.
@@ -692,6 +697,7 @@ module Psych
 
         template_items = template_value.sequence_items(comment_tracker: @template_analysis.comment_tracker)
         dest_items = dest_value.sequence_items(comment_tracker: @dest_analysis.comment_tracker)
+        template_items_by_key = build_sequence_item_match_map(template_items, @template_analysis)
         next_template_by_id = build_next_node_lookup(template_items)
         next_dest_by_id = build_next_node_lookup(dest_items)
 
@@ -720,6 +726,7 @@ module Psych
 
         dest_items.each_with_index do |item, dest_idx|
           removing_destination_only_item = @remove_template_missing_nodes && !sequence_matches.key?(dest_idx)
+          skipped_redundant_duplicate = false
 
           if prev_dest_end_line && !removing_destination_only_item
             effective_start = effective_start_line(item, @dest_analysis)
@@ -752,13 +759,14 @@ module Psych
           elsif @remove_template_missing_nodes
             emitted_recursively = should_recurse?(depth) && (item.mapping? || item.sequence?)
             emit_removed_sequence_item_comments(item, @dest_analysis, depth: depth)
+          elsif redundant_destination_sequence_duplicate?(item, template_items_by_key)
+            skipped_redundant_duplicate = true
           else
             emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
           end
 
-          prev_dest_end_line = if removing_destination_only_item
-            next_effective_start = effective_start_line(next_dest_node, @dest_analysis)
-            next_effective_start ? next_effective_start - 1 : nil
+          prev_dest_end_line = if removing_destination_only_item || skipped_redundant_duplicate
+            skipped_destination_node_boundary(next_dest_node, @dest_analysis)
           elsif emitted_recursively
             effective_end_line(item, @dest_analysis, next_node: next_dest_node)
           else
@@ -1172,6 +1180,14 @@ module Psych
         template_info
       end
 
+      def redundant_destination_sequence_duplicate?(item, template_items_by_key)
+        match_key = sequence_item_match_key(item, @dest_analysis)
+        candidates = template_items_by_key[match_key]
+        return false unless candidates&.any?
+
+        true
+      end
+
       def sequence_item_match_key(item, analysis)
         return [:scalar, item.value] if item.scalar?
         return [:alias, item.alias_anchor] if item.alias?
@@ -1304,6 +1320,18 @@ module Psych
         [end_line, [boundary, node_content_start_line(node)].max].min
       end
 
+      def preferred_emitted_end_line(node, effective_end_line)
+        return effective_end_line if effective_end_line
+        return node.end_line if node.respond_to?(:end_line) && node.end_line
+
+        nil
+      end
+
+      def skipped_destination_node_boundary(next_node, analysis)
+        next_effective_start = effective_start_line(next_node, analysis)
+        next_effective_start ? next_effective_start - 1 : nil
+      end
+
       def emit_trailing_lines_after_last_node(node, analysis)
         return unless node
 
@@ -1428,6 +1456,25 @@ module Psych
         return entry.start_line if entry.respond_to?(:start_line)
 
         nil
+      end
+
+      def redundant_destination_duplicate?(dest_node, template_candidates)
+        return false unless template_candidates&.any?
+
+        dest_identity = node_semantic_identity(dest_node, @dest_analysis)
+        return false unless dest_identity
+
+        template_candidates.any? do |candidate|
+          node_semantic_identity(candidate[:node], @template_analysis) == dest_identity
+        end
+      end
+
+      def node_semantic_identity(node, analysis)
+        if node.is_a?(MappingEntry)
+          return [:mapping_entry, node.key_name, canonical_sequence_item_value(node.value, analysis)]
+        end
+
+        canonical_sequence_item_value(node, analysis) if node.is_a?(NodeWrapper)
       end
 
       def resolved_comment_attachment(node, analysis = nil)

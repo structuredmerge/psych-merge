@@ -43,7 +43,7 @@ module Psych
         return emit_inline_comment_region(region) if inline
 
         previous_line = nil
-        region.nodes.each do |node|
+        deduplicated_region_nodes(region).each do |node|
           current_line = comment_region_line_number(node)
           emit_region_gap_lines(previous_line, current_line, source_lines)
           emit_comment_node(node)
@@ -211,6 +211,42 @@ module Psych
         return node.location.start_line if node.respond_to?(:location) && node.location
 
         nil
+      end
+
+      def deduplicated_region_nodes(region)
+        nodes = Array(region.nodes)
+        return nodes if nodes.length < 2
+
+        segment_length = repeated_region_segment_length(nodes)
+        return nodes unless segment_length
+
+        nodes.first(segment_length)
+      end
+
+      def repeated_region_segment_length(nodes)
+        signatures = nodes.map { |node| comment_region_node_signature(node) }
+
+        (1..(signatures.length / 2)).each do |segment_length|
+          next unless (signatures.length % segment_length).zero?
+
+          segment = signatures.first(segment_length)
+          repeats = signatures.length / segment_length
+          return segment_length if repeats > 1 && (0...repeats).all? { |idx| signatures.slice(idx * segment_length, segment_length) == segment }
+        end
+
+        nil
+      end
+
+      def comment_region_node_signature(node)
+        if node.respond_to?(:slice)
+          node.slice.to_s.chomp
+        elsif node.respond_to?(:text)
+          node.text.to_s.chomp
+        elsif node.respond_to?(:normalized_content)
+          node.normalized_content.to_s
+        else
+          node.to_s
+        end
       end
 
       def format_scalar(value, style)

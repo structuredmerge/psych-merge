@@ -150,6 +150,130 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result.scan(/strategy: raw_copy/).size).to eq(1)
       end
 
+      it "does not preserve a redundant duplicate destination mapping entry when template preference is used" do
+        template = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+        YAML
+        dest = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+            Exclude: ['*.md']
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result).to eq(template)
+        expect(result.scan(/Exclude: \['\*\.md'\]/).size).to eq(1)
+      end
+
+      it "does not preserve redundant duplicate destination sequence items when template preference is used" do
+        template = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+        dest = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result).to eq(template)
+        expect(result.scan(/- if: '\$CI_MERGE_REQUEST_IID'/).size).to eq(1)
+      end
+
+      it "does not preserve redundant duplicate destination entries when destination preference is used" do
+        template = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          files: {}
+        YAML
+        dest = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+            - path: "certs/**"
+              strategy: raw_copy
+
+          files: {}
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result).to eq(template)
+        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+      end
+
+      it "does not preserve duplicated destination comment blocks for matched keys" do
+        template = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+
+          # Self-test / templating CI threshold.
+          # Set to a number from 0 to 100 to fail `rake kettle:jem:selftest` once
+          min_divergence_threshold:
+        YAML
+        dest = <<~YAML
+          patterns:
+            - path: "certs/**"
+              strategy: raw_copy
+
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          # Per-file configuration (nested directory structure)
+          # Only files that need overrides belong here. Everything else defaults to merge.
+          files: {}
+
+          # Self-test / templating CI threshold.
+          # Set to a number from 0 to 100 to fail `rake kettle:jem:selftest` once
+          # Self-test / templating CI threshold.
+          # Set to a number from 0 to 100 to fail `rake kettle:jem:selftest` once
+          min_divergence_threshold:
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+        )
+        result = merger.merge
+
+        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
+        expect(result.scan(/# Self-test \/ templating CI threshold\./).size).to eq(1)
+      end
+
       it "does not duplicate a trailing commented mapping section after an identical sequence item" do
         template = <<~YAML
           patterns:
