@@ -38,6 +38,7 @@ Psych::Merge is a standalone Ruby module that intelligently merges two versions 
 - **Fuzzy Key Matching**: `MappingMatchRefiner` matches similar keys (e.g., `database_url` ↔ `db_url`)
   using Levenshtein distance for typos and naming convention differences
 - **Comment-Preserving**: Comments are preserved in their context
+- **Targeted Partial Merges**: `PartialTemplateMerger` can merge YAML fragments at a nested `key_path`
 - **Freeze Block Support**: Respects freeze markers (default: `psych-merge:freeze` / `psych-merge:unfreeze`) for merge control - customizable to match your project's conventions
 - **Full Provenance**: Tracks origin of every node
 - **Standalone**: Minimal dependencies - just `ast-merge` and Ruby's built-in `psych`
@@ -67,9 +68,9 @@ template = File.read("template.yml")
 destination = File.read("destination.yml")
 
 merger = Psych::Merge::SmartMerger.new(template, destination)
-result = merger.merge
+merged_content = merger.merge
 
-File.write("merged.yml", result.to_yaml)
+File.write("merged.yml", merged_content)
 ```
 
 ### The `*-merge` Gem Family
@@ -365,6 +366,37 @@ merger = Psych::Merge::SmartMerger.new(
 )
 ```
 
+### Destination-Only Nodes (Removal Mode)
+
+Control whether destination nodes that are missing from the template should be removed:
+
+```ruby
+merger = Psych::Merge::SmartMerger.new(
+  template,
+  destination,
+  remove_template_missing_nodes: true,
+)
+```
+
+When removal mode is enabled, `psych-merge` preserves or promotes associated
+destination comment regions where possible so removed YAML sections do not
+silently discard the surrounding comment context.
+
+### Recursive Merge Depth
+
+Control how deeply nested mappings and sequences are merged:
+
+```ruby
+# Default: recursively merge nested structures at any depth
+Psych::Merge::SmartMerger.new(template, destination, recursive: true)
+
+# Only recurse two levels deep
+Psych::Merge::SmartMerger.new(template, destination, recursive: 2)
+
+# Treat matched nested values atomically instead of merging inside them
+Psych::Merge::SmartMerger.new(template, destination, recursive: false)
+```
+
 ### Custom Freeze Token
 
 Use a custom freeze token to avoid conflicts with other tools:
@@ -434,10 +466,83 @@ template_content = File.read("template.yml")
 dest_content = File.read("destination.yml")
 
 merger = Psych::Merge::SmartMerger.new(template_content, dest_content)
+merged_content = merger.merge
+
+File.write("merged.yml", merged_content)
+```
+
+### Getting the Detailed Merge Result
+
+Use `merge` when you only need the final YAML string, or `merge_result` when you
+want merge statistics and provenance details as well:
+
+```ruby
+require "psych/merge"
+
+template_content = File.read("template.yml")
+dest_content = File.read("destination.yml")
+
+merger = Psych::Merge::SmartMerger.new(
+  template_content,
+  dest_content,
+  preference: :template,
+  add_template_only_nodes: true,
+)
+
+result = merger.merge_result
+
+puts result.content
+pp result.statistics
+```
+
+### Merging a YAML Fragment at a Nested Key Path
+
+Use `Psych::Merge::PartialTemplateMerger` when you want to merge only one nested
+value and leave the rest of the destination document untouched:
+
+```ruby
+require "psych/merge"
+
+template = <<~YAML
+  - examples/**/*
+  - vendor/**/*
+YAML
+
+destination = <<~YAML
+  AllCops:
+    Exclude:
+      - tmp/**/*
+    TargetRubyVersion: 3.3
+YAML
+
+merger = Psych::Merge::PartialTemplateMerger.new(
+  template: template,
+  destination: destination,
+  key_path: ["AllCops", "Exclude"],
+  add_missing: true,
+  remove_missing: false,
+  when_missing: :skip,
+  recursive: true,
+)
+
 result = merger.merge
 
-File.write("merged.yml", result.to_yaml)
+if result.key_path_found?
+  File.write(".rubocop.yml", result.content)
+else
+  warn(result.message)
+end
 ```
+
+`PartialTemplateMerger#merge` returns a result object with:
+
+- `content` - merged full-document YAML
+- `changed` - whether anything changed
+- `has_key_path` / `key_path_found?` - whether the target path existed
+- `message` - summary of what happened
+
+If you want the key path to be created when it is missing, pass
+`when_missing: :add`.
 
 ### Analyzing a YAML File
 

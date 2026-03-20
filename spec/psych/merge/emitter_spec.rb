@@ -81,6 +81,38 @@ RSpec.describe Psych::Merge::Emitter do
 
       expect(emitter.lines).to eq(["key: value # inline note"])
     end
+
+    it "deduplicates repeated shared region segments before emitting" do
+      emitter = described_class.new
+      region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :leading,
+        comments: [
+          {line: 1, indent: 0, text: "Header", full_line: true, raw: "# Header"},
+          {line: 2, indent: 0, text: "Details", full_line: true, raw: "# Details"},
+          {line: 1, indent: 0, text: "Header", full_line: true, raw: "# Header"},
+          {line: 2, indent: 0, text: "Details", full_line: true, raw: "# Details"},
+        ],
+      )
+
+      emitter.emit_comment_region(region)
+
+      expect(emitter.lines).to eq(["# Header", "# Details"])
+    end
+
+    it "aligns inline comments to the tracked source column when metadata is available" do
+      emitter = described_class.new
+      region = Ast::Merge::Comment::TrackedHashAdapter.region(
+        kind: :inline,
+        comments: [
+          {line: 1, indent: 18, text: "inline note", full_line: false, raw: "key: value      # inline note"},
+        ],
+      )
+
+      emitter.emit_raw_lines(["key: value"])
+      emitter.emit_comment_region(region, inline: true)
+
+      expect(emitter.lines).to eq(["key: value        # inline note"])
+    end
   end
 
   describe "#emit_comment_attachment" do

@@ -146,8 +146,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
-        expect(result.scan(/strategy: raw_copy/).size).to eq(1)
+        expect(result.scan('path: "certs/**"').size).to eq(1)
+        expect(result.scan("strategy: raw_copy").size).to eq(1)
       end
 
       it "does not preserve a redundant duplicate destination mapping entry when template preference is used" do
@@ -170,7 +170,7 @@ RSpec.describe Psych::Merge::SmartMerger do
         result = merger.merge
 
         expect(result).to eq(template)
-        expect(result.scan(/Exclude: \['\*\.md'\]/).size).to eq(1)
+        expect(result.scan("Exclude: ['*.md']").size).to eq(1)
       end
 
       it "does not preserve redundant duplicate destination sequence items when template preference is used" do
@@ -197,7 +197,7 @@ RSpec.describe Psych::Merge::SmartMerger do
         result = merger.merge
 
         expect(result).to eq(template)
-        expect(result.scan(/- if: '\$CI_MERGE_REQUEST_IID'/).size).to eq(1)
+        expect(result.scan("- if: '$CI_MERGE_REQUEST_IID'").size).to eq(1)
       end
 
       it "does not preserve redundant duplicate destination entries when destination preference is used" do
@@ -227,7 +227,7 @@ RSpec.describe Psych::Merge::SmartMerger do
         result = merger.merge
 
         expect(result).to eq(template)
-        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+        expect(result.scan('path: "certs/**"').size).to eq(1)
       end
 
       it "does not preserve duplicated destination comment blocks for matched keys" do
@@ -270,8 +270,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
-        expect(result.scan(/# Self-test \/ templating CI threshold\./).size).to eq(1)
+        expect(result.scan("# Per-file configuration (nested directory structure)").size).to eq(1)
+        expect(result.scan("# Self-test / templating CI threshold.").size).to eq(1)
       end
 
       it "does not duplicate a trailing commented mapping section after an identical sequence item" do
@@ -308,8 +308,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
-        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
+        expect(result.scan('path: "certs/**"').size).to eq(1)
+        expect(result.scan("# Per-file configuration (nested directory structure)").size).to eq(1)
       end
 
       it "matches sequence mapping items by unique shared scalar observations instead of hard-coded key names" do
@@ -338,8 +338,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/engine: ruby/).size).to eq(1)
-        expect(result.scan(/engine: truffleruby/).size).to eq(1)
+        expect(result.scan("engine: ruby").size).to eq(1)
+        expect(result.scan("engine: truffleruby").size).to eq(1)
         expect(result).to include("command: bundle exec rspec # destination inline")
       end
 
@@ -417,9 +417,9 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/engine: ruby/).size).to eq(1)
-        expect(result.scan(/channel: current/).size).to eq(1)
-        expect(result.scan(/command: bundle exec rspec/).size).to eq(1)
+        expect(result.scan("engine: ruby").size).to eq(1)
+        expect(result.scan("channel: current").size).to eq(1)
+        expect(result.scan("command: bundle exec rspec").size).to eq(1)
       end
 
       it "matches citation-style author entries by shared stable observations when mutable fields change" do
@@ -448,7 +448,7 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/given-names:/).size).to eq(1)
+        expect(result.scan("given-names:").size).to eq(1)
         expect(result).to include('given-names: "Peter H."')
         expect(result).to include('email: "floss@glatzo.com"')
         expect(result).not_to include("Peter Hurn")
@@ -530,8 +530,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/# TruffleRuby current/).size).to eq(1)
-        expect(result.scan(/# JRuby current/).size).to eq(1)
+        expect(result.scan("# TruffleRuby current").size).to eq(1)
+        expect(result.scan("# JRuby current").size).to eq(1)
         expect(result.scan(/- ruby: truffleruby$/).size).to eq(1)
         expect(result.scan(/- ruby: jruby$/).size).to eq(1)
       end
@@ -714,9 +714,9 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include("# Token section comment")
         expect(result).to include("# Patterns section comment")
         expect(result).to include("# Files section comment")
-        expect(result.scan(/# Files section comment/).size).to eq(1)
-        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
-        expect(result).to include('freeze_token: destination-token')
+        expect(result.scan("# Files section comment").size).to eq(1)
+        expect(result.scan('path: "certs/**"').size).to eq(1)
+        expect(result).to include("freeze_token: destination-token")
         expect(result).to include('name: "Custom Author"')
       end
 
@@ -880,9 +880,9 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result.scan(/# Glob patterns evaluated in order \(first match wins\)/).size).to eq(1)
-        expect(result.scan(/# Per-file configuration \(nested directory structure\)/).size).to eq(1)
-        expect(result.scan(/path: "certs\/\*\*"/).size).to eq(1)
+        expect(result.scan("# Glob patterns evaluated in order (first match wins)").size).to eq(1)
+        expect(result.scan("# Per-file configuration (nested directory structure)").size).to eq(1)
+        expect(result.scan('path: "certs/**"').size).to eq(1)
       end
     end
   end
@@ -1450,6 +1450,42 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).not_to include("remove_me: should_be_gone")
     end
 
+    it "preserves separator blank lines around promoted removed-node comments" do
+      template = <<~YAML
+        keep_me: value
+        tail: keep
+      YAML
+
+      dest = <<~YAML
+        keep_me: dest_value
+
+        # Removed node comment
+        remove_me: should_be_gone # Removed node inline comment
+
+        # Trailing note
+
+        tail: keep
+      YAML
+
+      merger = described_class.new(
+        template,
+        dest,
+        remove_template_missing_nodes: true,
+      )
+      result = merger.merge
+
+      expect(result).to eq(<<~YAML)
+        keep_me: dest_value
+
+        # Removed node comment
+        # Removed node inline comment
+
+        # Trailing note
+
+        tail: keep
+      YAML
+    end
+
     it "keeps destination-only nodes when disabled (default)" do
       template = <<~YAML
         keep_me: value
@@ -1947,7 +1983,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("- name: added")
       expect(result).to include("value: template_added")
       expect(result).not_to include("- name: remove")
-      expect(result.scan(/- name: keep/).size).to eq(1)
+      expect(result.scan("- name: keep").size).to eq(1)
     end
 
     it "recursively matches outer sequence items that are nested sequences while removing destination-only siblings" do
@@ -1980,7 +2016,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       )
       result = merger.merge
 
-      expect(result.scan(/# Keep group docs/).size).to eq(1)
+      expect(result.scan("# Keep group docs").size).to eq(1)
       expect(result).to include("- - keep # keep inline")
       expect(result).to include("- template_inner")
       expect(result).to include("# Remove group docs")
@@ -2035,7 +2071,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("add: template_added")
       expect(result).to include("- name: untouched")
       expect(result).to include("stable: template_stable")
-      expect(result.scan(/# Shared section docs/).size).to eq(1)
+      expect(result.scan("# Shared section docs").size).to eq(1)
       expect(result).not_to include("remove: old_value")
     end
 
@@ -2088,7 +2124,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("- add_rule")
       expect(result).to include("- name: untouched")
       expect(result).to include("stable: template_stable")
-      expect(result.scan(/# Shared section docs/).size).to eq(1)
+      expect(result.scan("# Shared section docs").size).to eq(1)
       expect(result).not_to include("- remove_rule")
       expect(result).to match(/# More shared docs\n\n        # Remove docs/)
     end
@@ -2148,7 +2184,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("value: template_added")
       expect(result).to include("- name: untouched")
       expect(result).to include("stable: template_stable")
-      expect(result.scan(/# Shared rule docs/).size).to eq(1)
+      expect(result.scan("# Shared rule docs").size).to eq(1)
       expect(result).not_to include("- id: remove")
       expect(result).to match(/# More shared rule docs\n\n        # Remove rule docs/)
     end
@@ -2205,9 +2241,9 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("value: template_alpha # alpha inline")
       expect(result).to include("# Removed rule docs")
       expect(result).to include("# remove inline")
-      expect(result.scan(/- id: alpha/).size).to eq(1)
-      expect(result.scan(/- id: beta/).size).to eq(1)
-      expect(result.scan(/- id: add/).size).to eq(1)
+      expect(result.scan("- id: alpha").size).to eq(1)
+      expect(result.scan("- id: beta").size).to eq(1)
+      expect(result.scan("- id: add").size).to eq(1)
       expect(result).not_to include("- id: remove")
     end
 
@@ -2269,9 +2305,9 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).to include("value: template_first # first inline")
       expect(result).to include("# Removed duplicate docs")
       expect(result).to include("# remove inline")
-      expect(result.scan(/scope: first/).size).to eq(1)
-      expect(result.scan(/scope: second/).size).to eq(1)
-      expect(result.scan(/scope: add/).size).to eq(1)
+      expect(result.scan("scope: first").size).to eq(1)
+      expect(result.scan("scope: second").size).to eq(1)
+      expect(result.scan("scope: add").size).to eq(1)
       expect(result).not_to include("scope: remove")
     end
   end

@@ -25,6 +25,7 @@ Please file a bug if you notice a violation of semantic versioning.
 ### Changed
 
 - Adopted the shared `Ast::Merge::Layout` contract for YAML document gaps, including shared layout compliance coverage over top-level mapping/sequence ownership
+- Rebased `Psych::Merge::PartialTemplateMerger` onto the shared `Ast::Merge::KeyPathPartialTemplateMergerBase`, leaving YAML-specific child traversal, serialization, and `SmartMerger` wiring local while moving key-path navigation and missing-path insertion into the shared substrate
 - **BREAKING**: `ConflictResolver#merge_nodes_to_emitter` signature simplified to
   `merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)`.
   Removed `processed_template_sigs`, `processed_dest_sigs`, and `dest_by_sig`
@@ -50,6 +51,11 @@ Please file a bug if you notice a violation of semantic versioning.
   postlude comment regions and matched mapping-entry preludes are emitted from
   the template side instead of being dropped or replaced by destination-only
   boundaries in `.kettle-jem.yml`-style files
+- Fix top-level removal-mode separator-gap handling so promoted comments from a
+  removed destination-only mapping preserve the intended blank line before the
+  following destination comment block, while recursive sequence-item removal
+  continues to collapse item-spacing as required by the existing reproducible
+  fixture contract
 - Fix destination-preference document postlude emission so template-only
   trailing footer comment blocks (such as the instructional footer in
   `.kettle-jem.yml`-style files) are preserved when

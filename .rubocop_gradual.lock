@@ -1,0 +1,34 @@
+{
+  "gemfiles/modular/tree_sitter.gemfile:3944125292": [
+    [17, 1, 112, "Style/InvertibleUnlessCondition: Prefer `if ENV.fetch(\"KETTLE_RB_DEV\", \"false\").casecmp(\"false\").nonzero?` over `unless ENV.fetch(\"KETTLE_RB_DEV\", \"false\").casecmp(\"false\").zero?`.", 2718008714]
+  ],
+  "lib/psych/merge/conflict_resolver.rb:3680077768": [
+    [1045, 9, 51, "Style/InvertibleUnlessCondition: Prefer `if entry.start_line >= content_start_line` over `unless entry.start_line < content_start_line`.", 650133005],
+    [1245, 97, 16, "Style/RedundantEach: Use `with_object` to remove redundant `each`.", 4071736605],
+    [1310, 32, 47, "Style/SafeNavigation: Use safe navigation (`&.`) instead of checking if an object exists before calling the method.", 1103286539],
+    [1318, 9, 61, "Style/ComparableClamp: Use `Comparable#clamp` instead.", 2049894660],
+    [1448, 45, 43, "Style/SafeNavigation: Use safe navigation (`&.`) instead of checking if an object exists before calling the method.", 2938075194],
+    [1482, 23, 57, "Style/SafeNavigation: Use safe navigation (`&.`) instead of checking if an object exists before calling the method.", 2842638635]
+  ],
+  "lib/psych/merge/emitter.rb:247370604": [
+    [230, 11, 54, "Style/InvertibleUnlessCondition: Prefer `if (signatures.length % segment_length).nonzero?` over `unless (signatures.length % segment_length).zero?`.", 2407102338]
+  ],
+  "spec/psych/merge/comment_tracker_spec.rb:3336668940": [
+    [158, 3, 796, "RSpec/RepeatedExampleGroupDescription: Repeated describe block description on line(s) [311]", 3444059263],
+    [311, 3, 1610, "RSpec/RepeatedExampleGroupDescription: Repeated describe block description on line(s) [158]", 1261385960]
+  ],
+  "spec/psych/merge/file_analysis_spec.rb:90872882": [
+    [323, 13, 27, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 1149632441],
+    [326, 15, 25, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 1846333062],
+    [337, 15, 27, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 3002453434],
+    [671, 13, 27, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 1149632441]
+  ],
+  "spec/psych/merge/node_wrapper_spec.rb:1349095710": [
+    [97, 13, 27, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 1149632441],
+    [116, 15, 20, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 1757040190],
+    [129, 15, 23, "RSpec/ContextWording: Context description should match /^when\\b/, /^with\\b/, or /^without\\b/.", 649972822]
+  ],
+  "spec/psych/merge/removal_mode_compliance_spec.rb:257187544": [
+    [3, 1, 40, "RSpec/SpecFilePathFormat: Spec path should end with `psych/merge/smart_merger*_spec.rb`.", 926171499]
+  ]
+}

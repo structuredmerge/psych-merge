@@ -23,6 +23,7 @@ module Psych
     # @see Ast::Merge::ConflictResolverBase
     class ConflictResolver < Ast::Merge::ConflictResolverBase
       include ::Ast::Merge::TrailingGroups::DestIterate
+
       # Creates a new ConflictResolver
       #
       # @param template_analysis [FileAnalysis] Analyzed template file
@@ -158,7 +159,10 @@ module Psych
 
         # Pre-compute position-aware trailing groups for template-only nodes.
         dest_sigs = ::Set.new
-        dest_nodes.each { |n| sig = @dest_analysis.generate_signature(n); dest_sigs << sig if sig }
+        dest_nodes.each { |n|
+          sig = @dest_analysis.generate_signature(n)
+          dest_sigs << sig if sig
+        }
         refined_template_ids = ::Set.new(@refined_matches.keys.map(&:object_id))
 
         trailing_groups, all_matched_template_indices = build_dest_iterate_trailing_groups(
@@ -168,7 +172,6 @@ module Psych
           refined_template_ids: refined_template_ids,
           add_template_only_nodes: @add_template_only_nodes,
         )
-
 
         # Emit template-only nodes that precede the first matched template node
         emit_prefix_trailing_group(trailing_groups, consumed_template_indices) do |info|
@@ -191,6 +194,7 @@ module Psych
           next_dest_node = next_dest_by_id[dest_node.object_id]
           dest_sig = @dest_analysis.generate_signature(dest_node)
           effective_dest_end_line = effective_end_line(dest_node, @dest_analysis, next_node: next_dest_node)
+          removed_boundary = nil
 
           # Preserve inter-node blank lines from destination
           if prev_end_line && dest_node.respond_to?(:start_line) && dest_node.start_line
@@ -252,16 +256,14 @@ module Psych
               consumed_template_indices << template_info[:index]
               sig_cursor[dest_sig] = cursor + 1
               matched_template_index = template_info[:index]
-            else
+            elsif @remove_template_missing_nodes
               # All template copies consumed — destination-only duplicate
-              if @remove_template_missing_nodes
-                emit_removed_destination_node_comments(dest_node, @dest_analysis)
-                emitted_dest_node = false
-              elsif redundant_destination_duplicate?(dest_node, candidates)
-                emitted_dest_node = false
-              else
-                emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
-              end
+              removed_boundary = emit_removed_destination_node_comments(dest_node, @dest_analysis, next_node: next_dest_node)
+              emitted_dest_node = false
+            elsif redundant_destination_duplicate?(dest_node, candidates)
+              emitted_dest_node = false
+            else
+              emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
           elsif refined_dest_to_template.key?(dest_node)
             # Found refined match
@@ -301,21 +303,19 @@ module Psych
                 next_dest_node: next_dest_node,
               )
             end
-          else
+          elsif @remove_template_missing_nodes
             # Destination-only node
             # If remove_template_missing_nodes is enabled, skip this node (remove it)
-            if @remove_template_missing_nodes
-              emit_removed_destination_node_comments(dest_node, @dest_analysis)
-              emitted_dest_node = false
-            else
-              emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
-            end
+            removed_boundary = emit_removed_destination_node_comments(dest_node, @dest_analysis, next_node: next_dest_node)
+            emitted_dest_node = false
+          else
+            emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
           end
 
           prev_end_line = if emitted_dest_node
             preferred_emitted_end_line(dest_node, effective_dest_end_line)
           else
-            skipped_destination_node_boundary(next_dest_node, @dest_analysis)
+            removed_boundary || skipped_destination_node_boundary(next_dest_node, @dest_analysis)
           end
 
           # After each dest node, flush any trailing groups that are now ready.
@@ -718,7 +718,6 @@ module Psych
           seq_all_matched_indices = ::Set.new
         end
 
-
         # Emit template-only items that precede the first matched template item
         emit_prefix_trailing_group(seq_trailing_groups, consumed_template_indices) do |info|
           emit_sequence_item(info[:item], @template_analysis, next_node: next_template_by_id[info[:item].object_id])
@@ -1075,7 +1074,7 @@ module Psych
             source_content_start_line - 1,
             source_analysis,
           ) if source_analysis && source_content_start_line
-          return
+          nil
         end
       end
 
@@ -1111,7 +1110,8 @@ module Psych
         )
       end
 
-      def emit_removed_destination_node_comments(node, analysis)
+      def emit_removed_destination_node_comments(node, analysis, next_node: nil)
+        before_count = @emitter.lines.length
         leading_region = node_leading_comment_region(node, analysis)
         content_start_line = node_content_start_line(node)
         if leading_region && !leading_region.empty?
@@ -1120,6 +1120,9 @@ module Psych
         end
 
         emit_removed_destination_node_inline_comments(node, analysis)
+        return unless @emitter.lines.length > before_count
+
+        effective_end_line(node, analysis, next_node: next_node) || content_start_line
       end
 
       def emit_removed_destination_node_inline_comments(node, analysis)
@@ -1390,8 +1393,8 @@ module Psych
         if normalized_nodes.any?
           first_node_start = effective_start_line(normalized_nodes.first, analysis)
           emit_interstitial_blank_lines(last_region_end + 1, first_node_start - 1, analysis) if last_region_end && first_node_start
-        else
-          emit_interstitial_blank_lines(last_region_end + 1, analysis.lines.length, analysis) if last_region_end
+        elsif last_region_end
+          emit_interstitial_blank_lines(last_region_end + 1, analysis.lines.length, analysis)
         end
       end
 

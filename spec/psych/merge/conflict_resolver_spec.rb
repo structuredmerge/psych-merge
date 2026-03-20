@@ -1311,7 +1311,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("- name: added")
         expect(yaml).to include("value: template_added")
         expect(yaml).not_to include("- name: remove")
-        expect(yaml.scan(/- name: keep/).size).to eq(1)
+        expect(yaml.scan("- name: keep").size).to eq(1)
       end
 
       it "recursively matches outer sequence items that are nested sequences while removing destination-only siblings" do
@@ -1350,7 +1350,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         resolver.resolve(result)
         yaml = result.to_yaml
 
-        expect(yaml.scan(/# Keep group docs/).size).to eq(1)
+        expect(yaml.scan("# Keep group docs").size).to eq(1)
         expect(yaml).to include("- - keep # keep inline")
         expect(yaml).to include("- template_inner")
         expect(yaml).to include("# Remove group docs")
@@ -1411,7 +1411,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("add: template_added")
         expect(yaml).to include("- name: untouched")
         expect(yaml).to include("stable: template_stable")
-        expect(yaml.scan(/# Shared section docs/).size).to eq(1)
+        expect(yaml.scan("# Shared section docs").size).to eq(1)
         expect(yaml).not_to include("remove: old_value")
       end
 
@@ -1470,7 +1470,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("- add_rule")
         expect(yaml).to include("- name: untouched")
         expect(yaml).to include("stable: template_stable")
-        expect(yaml.scan(/# Shared section docs/).size).to eq(1)
+        expect(yaml.scan("# Shared section docs").size).to eq(1)
         expect(yaml).not_to include("- remove_rule")
         expect(yaml).to match(/# More shared docs\n\n        # Remove docs/)
       end
@@ -1536,7 +1536,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("value: template_added")
         expect(yaml).to include("- name: untouched")
         expect(yaml).to include("stable: template_stable")
-        expect(yaml.scan(/# Shared rule docs/).size).to eq(1)
+        expect(yaml.scan("# Shared rule docs").size).to eq(1)
         expect(yaml).not_to include("- id: remove")
         expect(yaml).to match(/# More shared rule docs\n\n        # Remove rule docs/)
       end
@@ -1599,9 +1599,9 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("value: template_alpha # alpha inline")
         expect(yaml).to include("# Removed rule docs")
         expect(yaml).to include("# remove inline")
-        expect(yaml.scan(/- id: alpha/).size).to eq(1)
-        expect(yaml.scan(/- id: beta/).size).to eq(1)
-        expect(yaml.scan(/- id: add/).size).to eq(1)
+        expect(yaml.scan("- id: alpha").size).to eq(1)
+        expect(yaml.scan("- id: beta").size).to eq(1)
+        expect(yaml.scan("- id: add").size).to eq(1)
         expect(yaml).not_to include("- id: remove")
       end
 
@@ -1669,9 +1669,9 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("value: template_first # first inline")
         expect(yaml).to include("# Removed duplicate docs")
         expect(yaml).to include("# remove inline")
-        expect(yaml.scan(/scope: first/).size).to eq(1)
-        expect(yaml.scan(/scope: second/).size).to eq(1)
-        expect(yaml.scan(/scope: add/).size).to eq(1)
+        expect(yaml.scan("scope: first").size).to eq(1)
+        expect(yaml.scan("scope: second").size).to eq(1)
+        expect(yaml.scan("scope: add").size).to eq(1)
         expect(yaml).not_to include("scope: remove")
       end
     end
