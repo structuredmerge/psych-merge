@@ -26,6 +26,9 @@ Please file a bug if you notice a violation of semantic versioning.
 
 - Adopted the shared `Ast::Merge::Layout` contract for YAML document gaps, including shared layout compliance coverage over top-level mapping/sequence ownership
 - Rebased `Psych::Merge::PartialTemplateMerger` onto the shared `Ast::Merge::KeyPathPartialTemplateMergerBase`, leaving YAML-specific child traversal, serialization, and `SmartMerger` wiring local while moving key-path navigation and missing-path insertion into the shared substrate
+- Rebased `Psych::Merge::CommentTracker` onto the shared
+  `Ast::Merge::Comment::HashTrackerBase`, keeping YAML-specific `#` extraction
+  heuristics and owner resolution local
 - **BREAKING**: `ConflictResolver#merge_nodes_to_emitter` signature simplified to
   `merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)`.
   Removed `processed_template_sigs`, `processed_dest_sigs`, and `dest_by_sig`
@@ -37,6 +40,9 @@ Please file a bug if you notice a violation of semantic versioning.
 - Preserved normalized comment regions and attachments through YAML emission and merge paths while keeping document boundaries, recursive comment-heavy fixtures, and destination-leading / inline ownership stable under template preference
 - Clarified the YAML removal-mode baseline so `remove_template_missing_nodes: true` preserves or promotes comment regions for removed destination-only mappings instead of silently dropping them
 - Adopted `Ast::Merge::TrailingGroups::DestIterate` plus shared deferred-flush ordering for mappings and sequence items so template-only YAML additions keep their template-relative position even when destination keys or list items are reordered
+- `Psych::Merge::Emitter` now reuses the shared `EmitterBase` comment-region and
+  attachment emission flow again, keeping only YAML-local deduplication and
+  tracked-column inline alignment behavior in the Psych layer
 
 ### Fixed
 
