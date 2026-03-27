@@ -1017,6 +1017,66 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(output).to include("- template_extra # template inline")
       end
 
+      it "applies parent fallback only to the last nested sequence item" do
+        template = <<~YAML
+          jobs:
+            test:
+              steps:
+                - name: Install
+                  with:
+                    args:
+                      - keep1
+                      - keep2
+
+                - name: Next
+                  run: template
+        YAML
+        dest = <<~YAML
+          jobs:
+            test:
+              steps:
+                - name: Install
+                  with:
+                    args:
+                      - keep1
+
+                      - keep2
+
+
+
+                - name: Next
+                  run: destination
+        YAML
+
+        template_analysis = Psych::Merge::FileAnalysis.new(template)
+        dest_analysis = Psych::Merge::FileAnalysis.new(dest)
+
+        resolver = described_class.new(
+          template_analysis,
+          dest_analysis,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+        )
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+        output = result.to_yaml
+
+        expect(output).to include("            - keep1\n\n            - keep2")
+        expect(output).to include("            - keep2\n\n\n\n      - name: Next")
+
+        second_pass = Psych::Merge::SmartMerger.new(
+          template,
+          output,
+          preference: :template,
+          recursive: true,
+          add_template_only_nodes: true,
+        ).merge
+
+        expect(second_pass).to eq(output)
+      end
+
       it "preserves leading comments for removed destination sequence items" do
         template = <<~YAML
           AllCops:

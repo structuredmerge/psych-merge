@@ -140,11 +140,11 @@ module Psych
         end
       end
 
-      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0, emit_destination_postlude: false)
+      def merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0, emit_destination_postlude: false, template_fallback_next_node: nil, dest_fallback_next_node: nil)
         # Build reverse lookup from dest_node to template_node for refined matches
         refined_dest_to_template = @refined_matches.invert
-        next_template_by_id = build_next_node_lookup(template_nodes)
-        next_dest_by_id = build_next_node_lookup(dest_nodes)
+        next_template_by_id = build_next_node_lookup(template_nodes, fallback_next_node: template_fallback_next_node)
+        next_dest_by_id = build_next_node_lookup(dest_nodes, fallback_next_node: dest_fallback_next_node)
 
         if emit_destination_postlude
           document_analysis, document_nodes = preferred_document_context(template_nodes, dest_nodes)
@@ -243,7 +243,13 @@ module Psych
 
               # Check if we should recursively merge nested structures
               if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
-                emit_recursive_merge(template_node, dest_node, depth: depth)
+                emit_recursive_merge(
+                  template_node,
+                  dest_node,
+                  depth: depth,
+                  next_template_node: next_template_by_id[template_node.object_id],
+                  next_dest_node: next_dest_node,
+                )
               else
                 emit_preferred_node(
                   template_node,
@@ -294,7 +300,13 @@ module Psych
 
             # Check if we should recursively merge nested structures
             if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
-              emit_recursive_merge(template_node, dest_node, depth: depth)
+              emit_recursive_merge(
+                template_node,
+                dest_node,
+                depth: depth,
+                next_template_node: next_template_by_id[template_node.object_id],
+                next_dest_node: next_dest_node,
+              )
             else
               emit_preferred_node(
                 template_node,
@@ -576,7 +588,7 @@ module Psych
       # @param template_node [MappingEntry, NodeWrapper] Template node with nested structure
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with nested structure
       # @param depth [Integer] Current recursion depth
-      def emit_recursive_merge(template_node, dest_node, depth:)
+      def emit_recursive_merge(template_node, dest_node, depth:, next_template_node: nil, next_dest_node: nil)
         # Preserve the destination prelude (leading comments / blank lines) for
         # recursively merged mapping entries, then emit the key line.
         if dest_node.respond_to?(:key) && dest_node.key
@@ -600,9 +612,21 @@ module Psych
         end
 
         if template_node.mapping? && dest_node.mapping?
-          emit_recursive_mapping_merge(template_node, dest_node, depth: depth)
+          emit_recursive_mapping_merge(
+            template_node,
+            dest_node,
+            depth: depth,
+            next_template_node: next_template_node,
+            next_dest_node: next_dest_node,
+          )
         elsif template_node.sequence? && dest_node.sequence?
-          emit_recursive_sequence_merge(template_node, dest_node, depth: depth)
+          emit_recursive_sequence_merge(
+            template_node,
+            dest_node,
+            depth: depth,
+            next_template_node: next_template_node,
+            next_dest_node: next_dest_node,
+          )
         end
       end
 
@@ -611,7 +635,7 @@ module Psych
       # @param template_node [MappingEntry, NodeWrapper] Template node with mapping value
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with mapping value
       # @param depth [Integer] Current recursion depth
-      def emit_recursive_mapping_merge(template_node, dest_node, depth:)
+      def emit_recursive_mapping_merge(template_node, dest_node, depth:, next_template_node: nil, next_dest_node: nil)
         # Get the mapping node:
         # - MappingEntry has .value which is a NodeWrapper wrapping the mapping
         # - NodeWrapper that IS a mapping should be used directly
@@ -668,6 +692,8 @@ module Psych
           dest_nested,
           nested_template_by_sig,
           depth: depth + 1,
+          template_fallback_next_node: next_template_node,
+          dest_fallback_next_node: next_dest_node,
         )
       end
 
@@ -677,7 +703,7 @@ module Psych
       # @param template_node [MappingEntry, NodeWrapper] Template node with sequence value
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with sequence value
       # @param depth [Integer] Current recursion depth
-      def emit_recursive_sequence_merge(template_node, dest_node, depth:)
+      def emit_recursive_sequence_merge(template_node, dest_node, depth:, next_template_node: nil, next_dest_node: nil)
         # Get the sequence node:
         # - MappingEntry has .value which is a NodeWrapper wrapping the sequence
         # - NodeWrapper that IS a sequence should be used directly
@@ -698,8 +724,8 @@ module Psych
         template_items = template_value.sequence_items(comment_tracker: @template_analysis.comment_tracker)
         dest_items = dest_value.sequence_items(comment_tracker: @dest_analysis.comment_tracker)
         template_items_by_key = build_sequence_item_match_map(template_items, @template_analysis)
-        next_template_by_id = build_next_node_lookup(template_items)
-        next_dest_by_id = build_next_node_lookup(dest_items)
+        next_template_by_id = build_next_node_lookup(template_items, fallback_next_node: next_template_node)
+        next_dest_by_id = build_next_node_lookup(dest_items, fallback_next_node: next_dest_node)
 
         sequence_matches = build_sequence_item_matches(template_items, dest_items)
         consumed_template_indices = ::Set.new
@@ -741,7 +767,13 @@ module Psych
 
             if should_recurse?(depth) && can_merge_recursively?(template_item, item)
               emitted_recursively = true
-              emit_recursive_merge(template_item, item, depth: depth)
+              emit_recursive_merge(
+                template_item,
+                item,
+                depth: depth,
+                next_template_node: next_template_by_id[template_item.object_id],
+                next_dest_node: next_dest_node,
+              )
             elsif preference_for_pair(template_item, item) == :destination
               emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
             else
@@ -1295,14 +1327,19 @@ module Psych
         next_start_line = effective_start_line(next_node, analysis)
         return item.end_line unless next_start_line
 
-        [item.end_line, next_start_line - 1].min
+        boundary = next_start_line - 1
+        if analysis.respond_to?(:comment_tracker)
+          boundary -= 1 while boundary >= 1 && analysis.comment_tracker.blank_line?(boundary)
+        end
+
+        [item.end_line, [boundary, item.start_line].max].min
       end
 
-      def build_next_node_lookup(nodes)
+      def build_next_node_lookup(nodes, fallback_next_node: nil)
         lookup = {}
 
         nodes.each_with_index do |node, idx|
-          lookup[node.object_id] = nodes[idx + 1]
+          lookup[node.object_id] = nodes[idx + 1] || fallback_next_node
         end
 
         lookup

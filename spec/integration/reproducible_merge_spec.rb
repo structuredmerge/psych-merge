@@ -118,5 +118,13 @@ RSpec.describe "Psych reproducible merge" do
         remove_template_missing_nodes: true,
       }
     end
+
+    context "when a matched workflow step keeps destination-only nested mappings and blank separators" do
+      it_behaves_like "a reproducible merge", "16_sequence_item_nested_mapping_parent_gap_stability", {
+        preference: :template,
+        recursive: true,
+        add_template_only_nodes: true,
+      }
+    end
   end
 end
