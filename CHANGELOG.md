@@ -45,6 +45,10 @@ Please file a bug if you notice a violation of semantic versioning.
   tracked-column inline alignment behavior in the Psych layer
 - Upgraded `tree_haver` dependency to `~> 6.0`
 
+### Deprecated
+
+### Removed
+
 ### Fixed
 
 - `ConflictResolver#merge_nodes_to_emitter` now preserves inter-node blank lines
@@ -104,10 +108,6 @@ Please file a bug if you notice a violation of semantic versioning.
   is kept for emission ordering only. Complemented by dropping `:kind` from
   `document_region_key` so `:orphan` vs `:postlude` kind mismatches no longer
   defeat the deduplication set.
-
-### Deprecated
-
-### Removed
 
 ### Security
 

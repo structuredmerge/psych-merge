@@ -46,6 +46,13 @@ jobs:
             gemfile: "Appraisal.root"
             rubygems: latest
             bundler: latest
+          # truffleruby-24.1 (targets Ruby 3.3 compatibility)
+          - ruby: "truffleruby"
+            appraisal: "dep-heads"
+            exec_cmd: "rake spec"
+            gemfile: "Appraisal.root"
+            rubygems: default
+            bundler: default
 
 #          # truffleruby-24.1 (targets Ruby 3.3 compatibility)
 #          - ruby: "truffleruby"
