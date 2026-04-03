@@ -49,20 +49,20 @@ PATH
     psych-merge (1.0.0)
       ast-merge (~> 4.0, >= 4.0.5)
       psych (~> 5.0)
-      tree_haver (~> 5.0, >= 5.0.5)
+      tree_haver (~> 6.0, >= 6.0.0)
       version_gem (~> 1.1, >= 1.1.9)
 
 PATH
   remote: /home/pboling/src/kettle-rb/ast-merge
   specs:
     ast-merge (4.0.6)
-      tree_haver (~> 5.0, >= 5.0.5)
+      tree_haver (~> 6.0, >= 6.0.0)
       version_gem (~> 1.1, >= 1.1.9)
 
 PATH
   remote: /home/pboling/src/kettle-rb/tree_haver
   specs:
-    tree_haver (5.0.5)
+    tree_haver (6.0.0)
       version_gem (~> 1.1, >= 1.1.9)
 
 GEM
@@ -508,7 +508,7 @@ CHECKSUMS
   thor (1.5.0) sha256=e3a9e55fe857e44859ce104a84675ab6e8cd59c650a49106a05f55f136425e73
   timecop (0.9.10) sha256=12ba45ce57cdcf6b1043cb6cdffa6381fd89ce10d369c28a7f6f04dc1b0cd8eb
   timecop-rspec (1.0.3) sha256=005f14841bb606dcaefb060e321b5388e2e59537742bee8b3a9a9a40e598fab9
-  tree_haver (5.0.5)
+  tree_haver (6.0.0)
   tree_stump (0.2.0) sha256=760ca5dd50280232b4446ed800d0d3c1f3301ffb7194e024f598f097ad6e3f11
   tsort (0.2.0) sha256=9650a793f6859a43b6641671278f79cfead60ac714148aabe4e3f0060480089f
   ttfunk (1.8.0) sha256=a7cbc7e489cc46e979dde04d34b5b9e4f5c8f1ee5fc6b1a7be39b829919d20ca

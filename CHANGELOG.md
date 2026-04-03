@@ -43,6 +43,7 @@ Please file a bug if you notice a violation of semantic versioning.
 - `Psych::Merge::Emitter` now reuses the shared `EmitterBase` comment-region and
   attachment emission flow again, keeping only YAML-local deduplication and
   tracked-column inline alignment behavior in the Psych layer
+- Upgraded `tree_haver` dependency to `~> 6.0`
 
 ### Fixed
 
@@ -95,6 +96,14 @@ Please file a bug if you notice a violation of semantic versioning.
   parent-owned blank separators stable when destination-only nested mappings
   (such as a preserved `with:` block) survive the merge, preventing repeated
   template runs from growing that blank-line region on each pass.
+- Fix supplemental document postlude deduplication so orphan regions already
+  owned by the preferred source are excluded regardless of their position
+  relative to `last_content_line`. `emit_supplemental_document_postlude` now
+  builds `all_preferred_regions` by unioning `preferred_regions` with *all*
+  orphan regions from the preferred augmenter; the `last_content_line` filter
+  is kept for emission ordering only. Complemented by dropping `:kind` from
+  `document_region_key` so `:orphan` vs `:postlude` kind mismatches no longer
+  defeat the deduplication set.
 
 ### Deprecated
 

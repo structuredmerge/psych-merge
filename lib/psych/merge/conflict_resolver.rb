@@ -409,7 +409,19 @@ module Psych
           supplemental_analysis,
           supplemental_nodes.last,
         )
-        unique_regions = unique_document_regions(supplemental_regions, excluding: preferred_regions)
+
+        # For deduplication, also consider all orphan regions from the preferred
+        # analysis — not just those past last_content_line. When the last
+        # preferred YAML node's end_line encompasses trailing comments (e.g. a
+        # multi-value mapping), those orphans are classified inside the node's
+        # range and are excluded from preferred_regions by the start_line filter
+        # in document_trailing_regions_for. Without this, an identical trailing
+        # comment block present in both sources escapes deduplication and is
+        # emitted twice.
+        preferred_augmenter = document_comment_augmenter_for(preferred_analysis)
+        all_preferred_regions = preferred_regions | Array(preferred_augmenter&.orphan_regions).compact
+
+        unique_regions = unique_document_regions(supplemental_regions, excluding: all_preferred_regions)
         return if unique_regions.empty?
 
         emit_nonpreferred_document_postlude_regions(
@@ -467,7 +479,13 @@ module Psych
       def document_region_key(region)
         return unless region
 
-        [region.kind, region.normalized_content.to_s]
+        # Use only normalized_content for the deduplication key.
+        # Excluding :kind is intentional: the same trailing comment block can be
+        # classified as :postlude in one source and :orphan in the other depending
+        # on whether the last YAML node's reported end_line covers the comment
+        # lines (e.g. a multi-line mapping vs a compact one-liner). Including
+        # :kind in the key would cause identical content to be emitted twice.
+        region.normalized_content.to_s
       end
 
       def emit_preferred_node(template_node, dest_node, next_template_node: nil, next_dest_node: nil)
