@@ -16,7 +16,7 @@ Gem::Specification.new do |spec|
   spec.summary = "🍲 Intelligent YAML file merging using Psych AST analysis"
   spec.description = "🍲 Psych::Merge provides smart YAML file merging that preserves comments, anchors/aliases, and supports freeze blocks for protecting destination content. Perfect for merging configuration templates with customized destination files."
   spec.homepage = "https://github.com/kettle-rb/psych-merge"
-  spec.licenses = ["AGPL-3.0-only", "PolyForm-Small-Business-1.0.0", "LicenseRef-Big-Time-Public-License"]
+  spec.licenses = ["AGPL-3.0-only"]
   spec.required_ruby_version = ">= 3.2.0"
 
   # Linux distros often package gems and securely certify them independent
