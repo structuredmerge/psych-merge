@@ -2311,4 +2311,92 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(result).not_to include("scope: remove")
     end
   end
+
+  describe "add_template_only_sequence_items option" do
+    let(:template_block) do
+      <<~YAML
+        licenses:
+          - MIT
+          - Apache-2.0
+          - PolyForm-Small-Business-1.0.0
+      YAML
+    end
+
+    let(:dest_block_one) do
+      <<~YAML
+        licenses:
+          - ISC
+      YAML
+    end
+
+    let(:template_flow) do
+      <<~YAML
+        licenses: [MIT, Apache-2.0, PolyForm-Small-Business-1.0.0]
+      YAML
+    end
+
+    let(:dest_flow_one) do
+      <<~YAML
+        licenses: [ISC]
+      YAML
+    end
+
+    context "with add_template_only_nodes: true (default sequence behavior)" do
+      it "adds template-only items to a dest block sequence" do
+        merger = described_class.new(template_block, dest_block_one,
+          preference: :destination,
+          add_template_only_nodes: true)
+        result = merger.merge
+        expect(result).to include("ISC")
+        expect(result).to include("Apache-2.0")
+        expect(result).to include("PolyForm-Small-Business-1.0.0")
+      end
+    end
+
+    context "with add_template_only_sequence_items: false (user-locked sequences)" do
+      it "does NOT add template-only items to a dest block sequence" do
+        merger = described_class.new(template_block, dest_block_one,
+          preference: :destination,
+          add_template_only_nodes: true,
+          add_template_only_sequence_items: false)
+        result = merger.merge
+        expect(result).to include("ISC")
+        expect(result).not_to include("Apache-2.0")
+        expect(result).not_to include("PolyForm-Small-Business-1.0.0")
+      end
+
+      it "does NOT add template-only items to a dest flow sequence" do
+        merger = described_class.new(template_flow, dest_flow_one,
+          preference: :destination,
+          add_template_only_nodes: true,
+          add_template_only_sequence_items: false)
+        result = merger.merge
+        expect(result).to include("ISC")
+        expect(result).not_to include("Apache-2.0")
+        expect(result).not_to include("PolyForm-Small-Business-1.0.0")
+      end
+
+      it "still adds template-only mapping nodes when add_template_only_nodes is true" do
+        template = <<~YAML
+          name: project
+          licenses:
+            - MIT
+          new_key: added_by_template
+        YAML
+        dest = <<~YAML
+          name: project
+          licenses:
+            - ISC
+        YAML
+        merger = described_class.new(template, dest,
+          preference: :destination,
+          add_template_only_nodes: true,
+          add_template_only_sequence_items: false)
+        result = merger.merge
+        expect(result).to include("new_key: added_by_template")
+        expect(result).to include("ISC")
+        expect(result).not_to include("- MIT")
+      end
+    end
+  end
 end

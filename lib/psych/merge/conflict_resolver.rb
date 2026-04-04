@@ -42,7 +42,7 @@ module Psych
       # @param options [Hash] Additional options for forward compatibility
       # @param node_typing [Hash{Symbol,String => #call}, nil] Node typing configuration
       #   for per-node-type preferences
-      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, remove_template_missing_nodes: false, recursive: true, match_refiner: nil, node_typing: nil, **options)
+      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, add_template_only_sequence_items: nil, remove_template_missing_nodes: false, recursive: true, match_refiner: nil, node_typing: nil, **options)
         super(
           strategy: :batch,
           preference: preference,
@@ -54,6 +54,7 @@ module Psych
           match_refiner: match_refiner,
           **options
         )
+        @add_template_only_sequence_items = add_template_only_sequence_items.nil? ? add_template_only_nodes : add_template_only_sequence_items
         @node_typing = node_typing
         @emitter = Emitter.new
       end
@@ -749,8 +750,11 @@ module Psych
         consumed_template_indices = ::Set.new
         prev_dest_end_line = nil
 
-        # Pre-compute position-aware trailing groups for template-only sequence items
-        if @add_template_only_nodes
+        # Pre-compute position-aware trailing groups for template-only sequence items.
+        # Controlled by @add_template_only_sequence_items, which defaults to
+        # @add_template_only_nodes but can be set independently to false to prevent
+        # template items from being appended to user-controlled dest sequences.
+        if @add_template_only_sequence_items
           matched_template_indices_from_seq = ::Set.new(sequence_matches.values.map { |info| info[:index] })
           seq_trailing_groups, seq_all_matched_indices = build_trailing_groups(
             template_nodes: template_items,

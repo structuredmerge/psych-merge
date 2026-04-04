@@ -76,6 +76,7 @@ module Psych
         signature_generator: nil,
         preference: :destination,
         add_template_only_nodes: false,
+        add_template_only_sequence_items: nil,
         remove_template_missing_nodes: false,
         recursive: true,
         freeze_token: FileAnalysis::DEFAULT_FREEZE_TOKEN,
@@ -87,6 +88,7 @@ module Psych
       )
         @remove_template_missing_nodes = remove_template_missing_nodes
         @recursive = recursive
+        @add_template_only_sequence_items = add_template_only_sequence_items
         super(
           template_content,
           dest_content,
@@ -198,6 +200,7 @@ module Psych
           @dest_analysis,
           preference: @preference,
           add_template_only_nodes: @add_template_only_nodes,
+          add_template_only_sequence_items: @add_template_only_sequence_items,
           remove_template_missing_nodes: @remove_template_missing_nodes,
           recursive: @recursive,
           match_refiner: @match_refiner,
