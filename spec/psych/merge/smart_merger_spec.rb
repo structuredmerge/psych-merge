@@ -2398,5 +2398,47 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).not_to include("- MIT")
       end
     end
+
+    describe "multi-byte character (emoji) handling" do
+      it "does not duplicate keys when destination contains emoji values" do
+        template = "name: default"
+        dest = "emoji: \"🪙\"\nname: custom"
+        merger = described_class.new(template, dest,
+          preference: :destination,
+          add_template_only_nodes: true)
+        result = merger.merge
+        expect(result.scan("name:").length).to eq(1)
+      end
+
+      it "preserves emoji values in destination" do
+        template = "key: template"
+        dest = "key: \"🍲 special\""
+        merger = described_class.new(template, dest,
+          preference: :destination)
+        result = merger.merge
+        expect(result).to include("🍲 special")
+      end
+
+      it "handles multiple emoji without duplicating keys" do
+        template = "x: \"1\"\ny: \"2\""
+        dest = "e1: \"🍲\"\ne2: \"🪙\"\nx: a\ny: b"
+        merger = described_class.new(template, dest,
+          preference: :destination,
+          add_template_only_nodes: true)
+        result = merger.merge
+        expect(result.scan("x:").length).to eq(1)
+        expect(result.scan("y:").length).to eq(1)
+      end
+
+      it "handles CJK characters without duplicating keys" do
+        template = "lang: en"
+        dest = "greeting: \"こんにちは\"\nlang: ja"
+        merger = described_class.new(template, dest,
+          preference: :destination,
+          add_template_only_nodes: true)
+        result = merger.merge
+        expect(result.scan("lang:").length).to eq(1)
+      end
+    end
   end
 end
