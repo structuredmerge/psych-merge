@@ -21,6 +21,7 @@ Please file a bug if you notice a violation of semantic versioning.
 ### Added
 
 - Added shared `Ast::Merge::Comment` region, attachment, and augmenter adoption over Psych comment tracking, including normalized analysis and wrapper attachment APIs plus shared-example compliance coverage
+- Added `add_template_only_sequence_items` option to `SmartMerger` for preserving template-only list items during merge
 
 ### Changed
 
@@ -108,6 +109,7 @@ Please file a bug if you notice a violation of semantic versioning.
   is kept for emission ordering only. Complemented by dropping `:kind` from
   `document_region_key` so `:orphan` vs `:postlude` kind mismatches no longer
   defeat the deduplication set.
+- Fixed multi-byte character (emoji) handling — upstream `ast-merge` `byteslice` → `slice` fix prevents corruption when merging content with multi-byte characters
 
 ### Security
 
