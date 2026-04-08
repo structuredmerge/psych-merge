@@ -73,7 +73,6 @@ rescue LoadError
   end
 end
 
-
 ### RELEASE TASKS
 # Setup stone_checksums
 begin
