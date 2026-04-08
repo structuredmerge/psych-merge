@@ -57,6 +57,7 @@ module Psych
         @add_template_only_sequence_items = add_template_only_sequence_items.nil? ? add_template_only_nodes : add_template_only_sequence_items
         @node_typing = node_typing
         @emitter = Emitter.new
+        @last_raw_emitted_line = nil
       end
 
       protected
@@ -71,6 +72,7 @@ module Psych
 
           # Clear emitter for fresh merge
           @emitter.clear
+          @last_raw_emitted_line = nil
 
           # Build signature maps
           template_by_sig = build_signature_map(template_nodes, @template_analysis)
@@ -1032,7 +1034,10 @@ module Psych
             end
             unless lines.empty?
               emit_node_first_line(lines.shift, node, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
-              @emitter.emit_raw_lines(lines) if lines.any?
+              if lines.any?
+                @emitter.emit_raw_lines(lines)
+                @last_raw_emitted_line = [end_line, @last_raw_emitted_line || 0].max
+              end
             end
           end
         end
@@ -1063,7 +1068,10 @@ module Psych
           line = analysis.line_at(line_num)
           lines << line if line
         end
-        @emitter.emit_raw_lines(lines) if lines.any?
+        if lines.any?
+          @emitter.emit_raw_lines(lines)
+          @last_raw_emitted_line = [end_line, @last_raw_emitted_line || 0].max
+        end
       end
 
       # Emit a freeze block
@@ -1422,7 +1430,28 @@ module Psych
         # comment region (Psych inflates end_line to EOF).
         previous_end_line = deflated_content_end_line(last_content_line, analysis)
 
-        regions.each do |region|
+        # When a node was emitted as a raw block (not recursively merged),
+        # its full line range up to end_line was already output — including
+        # any trailing comment lines within the inflated range. Skip those
+        # regions to avoid duplication.
+        #
+        # Detect this condition: end_line > deflated means the node's
+        # reported range includes comment lines. If the node was emitted as
+        # a raw block, @last_raw_emitted_line tracks how far we actually
+        # emitted. Only filter when that tracking confirms the lines were
+        # output.
+        raw_ceiling = @last_raw_emitted_line
+        emittable_regions = if raw_ceiling && last_content_line && raw_ceiling >= last_content_line
+          regions.reject do |region|
+            region.respond_to?(:end_line) && region.end_line && region.end_line <= raw_ceiling
+          end
+        else
+          regions
+        end
+
+        return if emittable_regions.empty?
+
+        emittable_regions.each do |region|
           if previous_end_line && region.respond_to?(:start_line) && region.start_line
             emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
           end

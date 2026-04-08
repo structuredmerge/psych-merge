@@ -133,5 +133,12 @@ RSpec.describe "Psych reproducible merge" do
         add_template_only_nodes: true,
       }
     end
+
+    context "when compact template mapping and populated destination share identical trailing comment" do
+      it_behaves_like "a reproducible merge", "18_compact_mapping_trailing_comment_not_duplicated", {
+        preference: :destination,
+        add_template_only_nodes: true,
+      }
+    end
   end
 end
