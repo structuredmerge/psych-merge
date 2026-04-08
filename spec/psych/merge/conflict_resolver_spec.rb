@@ -1064,7 +1064,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         output = result.to_yaml
 
         expect(output).to include("            - keep1\n\n            - keep2")
-        expect(output).to include("            - keep2\n\n\n\n      - name: Next")
+        expect(output).to include("            - keep2\n\n      - name: Next")
 
         second_pass = Psych::Merge::SmartMerger.new(
           template,

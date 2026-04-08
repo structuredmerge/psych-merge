@@ -1883,7 +1883,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       )
       result = merger.merge
 
-      expect(result).to match(/# More section docs\n\n\n  child: template_value\n  added: template_added\n\z/)
+      expect(result).to match(/# More section docs\n\n  child: template_value\n  added: template_added\n\z/)
     end
 
     it "preserves blank-line-separated nested comment-only sections when a sibling is removed and another is added" do
@@ -1915,7 +1915,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       )
       result = merger.merge
 
-      expect(result).to match(/keep: template_value # keep inline\n\n  # Shared section docs\n  # More shared docs\n\n\n  # Remove docs\n  # remove inline\n  added: template_added\n\z/)
+      expect(result).to match(/keep: template_value # keep inline\n\n  # Shared section docs\n  # More shared docs\n\n  # Remove docs\n  # remove inline\n  added: template_added\n\z/)
     end
 
     it "preserves surviving sequence item comments while promoting removed sibling item comments" do
