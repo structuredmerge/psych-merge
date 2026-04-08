@@ -52,6 +52,7 @@ Please file a bug if you notice a violation of semantic versioning.
 
 ### Fixed
 
+- Fixed `.kettle-jem.yml` header comment duplication: file-header comments (starting at line 1, separated from the first key by a blank line) are now treated as preamble via upstream ast-merge change, preventing duplication when template-only keys are inserted before the first key
 - `ConflictResolver#merge_nodes_to_emitter` now preserves inter-node blank lines
   from the destination, so visual spacing between YAML sections (e.g., between
   `name:` and `on:` in GitHub Actions workflows) is maintained after merge

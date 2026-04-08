@@ -321,7 +321,7 @@ RSpec.describe Psych::Merge::CommentTracker do
       expect(leading.first[:text]).to eq("header comment")
     end
 
-    it "finds a comment separated from the node by a blank line" do
+    it "treats a line-1 comment followed by a gap as preamble (not owned by node)" do
       source = <<~YAML
         # These are supported funding model platforms
 
@@ -330,11 +330,11 @@ RSpec.describe Psych::Merge::CommentTracker do
 
       tracker = described_class.new(source)
       leading = tracker.leading_comments_before(3)
-      expect(leading.size).to eq(1)
-      expect(leading.first[:text]).to eq("These are supported funding model platforms")
+      expect(leading.size).to eq(0),
+        "Line-1 comment separated by a gap is preamble, not a leading comment"
     end
 
-    it "finds multiple comments separated by blank lines" do
+    it "strips line-1 preamble but keeps post-gap node-specific comments" do
       source = <<~YAML
         # First comment
 
@@ -345,9 +345,8 @@ RSpec.describe Psych::Merge::CommentTracker do
 
       tracker = described_class.new(source)
       leading = tracker.leading_comments_before(5)
-      expect(leading.size).to eq(2)
-      expect(leading.first[:text]).to eq("First comment")
-      expect(leading.last[:text]).to eq("Second comment")
+      expect(leading.size).to eq(1)
+      expect(leading.first[:text]).to eq("Second comment")
     end
 
     it "does not cross a non-comment non-blank line" do
