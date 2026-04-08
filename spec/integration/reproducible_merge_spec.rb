@@ -140,5 +140,12 @@ RSpec.describe "Psych reproducible merge" do
         add_template_only_nodes: true,
       }
     end
+
+    context "when attached trailing comment (no gap) is not duplicated across merge" do
+      it_behaves_like "a reproducible merge", "19_attached_trailing_comment_not_duplicated", {
+        preference: :destination,
+        add_template_only_nodes: true,
+      }
+    end
   end
 end

@@ -57,7 +57,7 @@ module Psych
         @add_template_only_sequence_items = add_template_only_sequence_items.nil? ? add_template_only_nodes : add_template_only_sequence_items
         @node_typing = node_typing
         @emitter = Emitter.new
-        @last_raw_emitted_line = nil
+        @last_document_node_recursively_merged = false
       end
 
       protected
@@ -72,7 +72,7 @@ module Psych
 
           # Clear emitter for fresh merge
           @emitter.clear
-          @last_raw_emitted_line = nil
+          @last_document_node_recursively_merged = false
 
           # Build signature maps
           template_by_sig = build_signature_map(template_nodes, @template_analysis)
@@ -224,6 +224,7 @@ module Psych
 
           matched_template_index = nil
           emitted_dest_node = true
+          recursively_merged = false
 
           # Check for signature match first
           if dest_sig && template_by_sig[dest_sig]
@@ -246,6 +247,7 @@ module Psych
 
               # Check if we should recursively merge nested structures
               if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
+                recursively_merged = true
                 emit_recursive_merge(
                   template_node,
                   dest_node,
@@ -303,6 +305,7 @@ module Psych
 
             # Check if we should recursively merge nested structures
             if should_recurse?(depth) && can_merge_recursively?(template_node, dest_node)
+              recursively_merged = true
               emit_recursive_merge(
                 template_node,
                 dest_node,
@@ -332,6 +335,11 @@ module Psych
           else
             removed_boundary || skipped_destination_node_boundary(next_dest_node, @dest_analysis)
           end
+
+          # Track whether the last document-level node was recursively merged.
+          # Only relevant at the document root (emit_destination_postlude context).
+          # The final iteration's value determines emit_document_postlude behavior.
+          @last_document_node_recursively_merged = recursively_merged if emit_destination_postlude
 
           # After each dest node, flush any trailing groups that are now ready.
           # A group anchored at index K is ready when ALL matched template indices
@@ -1036,7 +1044,6 @@ module Psych
               emit_node_first_line(lines.shift, node, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
               if lines.any?
                 @emitter.emit_raw_lines(lines)
-                @last_raw_emitted_line = [end_line, @last_raw_emitted_line || 0].max
               end
             end
           end
@@ -1070,7 +1077,6 @@ module Psych
         end
         if lines.any?
           @emitter.emit_raw_lines(lines)
-          @last_raw_emitted_line = [end_line, @last_raw_emitted_line || 0].max
         end
       end
 
@@ -1413,6 +1419,54 @@ module Psych
         @emitter.emit_raw_lines(lines) if lines.any?
       end
 
+      # Check whether a comment region's content already appears in the
+      # emitter's output. Used to prevent duplication when a raw-block
+      # emission (with Psych's inflated end_line) already included the
+      # trailing comment lines.
+      #
+      # @param region [Comment::Region] Region to check
+      # @param analysis [FileAnalysis] Source analysis for line content
+      # @return [Boolean] true when the region's text already appears in emitter output
+      def region_already_emitted?(region, analysis)
+        return false unless region.respond_to?(:nodes) && region.nodes&.any?
+
+        # Build the expected lines from the region's source
+        region_lines = region.nodes.filter_map do |node|
+          if node.respond_to?(:slice)
+            node.slice.to_s.chomp
+          elsif node.respond_to?(:text)
+            node.text.to_s.chomp
+          end
+        end
+        return false if region_lines.empty?
+
+        emitted = @emitter.lines
+        return false if emitted.size < region_lines.size
+
+        # Check if the region lines appear as a contiguous block anywhere
+        # in the tail portion of the emitter output. We check the last
+        # (region_lines.size * 3) lines to account for interstitial blanks.
+        search_window = [region_lines.size * 3, emitted.size].min
+        tail = emitted.last(search_window)
+
+        # Look for the first region line in the tail, then verify the rest follow
+        region_lines.size.times do |offset|
+          start_idx = tail.size - region_lines.size - offset
+          next if start_idx.negative?
+
+          match = true
+          region_lines.each_with_index do |expected, i|
+            unless tail[start_idx + i] == expected
+              match = false
+              break
+            end
+          end
+          return true if match
+        end
+
+        false
+      end
+
       def emit_document_postlude(analysis, fallback_node: nil)
         augmenter = document_comment_augmenter_for(analysis)
         return if fallback_node.nil?
@@ -1430,23 +1484,17 @@ module Psych
         # comment region (Psych inflates end_line to EOF).
         previous_end_line = deflated_content_end_line(last_content_line, analysis)
 
-        # When a node was emitted as a raw block (not recursively merged),
-        # its full line range up to end_line was already output — including
-        # any trailing comment lines within the inflated range. Skip those
-        # regions to avoid duplication.
-        #
-        # Detect this condition: end_line > deflated means the node's
-        # reported range includes comment lines. If the node was emitted as
-        # a raw block, @last_raw_emitted_line tracks how far we actually
-        # emitted. Only filter when that tracking confirms the lines were
-        # output.
-        raw_ceiling = @last_raw_emitted_line
-        emittable_regions = if raw_ceiling && last_content_line && raw_ceiling >= last_content_line
-          regions.reject do |region|
-            region.respond_to?(:end_line) && region.end_line && region.end_line <= raw_ceiling
-          end
-        else
+        # When the last document-level node was emitted as a raw block (not
+        # recursively merged), its inflated end_line range may already include
+        # trailing comment lines. Check the emitter output to avoid
+        # duplicating regions that were already emitted as raw content.
+        emittable_regions = if @last_document_node_recursively_merged
+          # Recursive merge: children were emitted individually and none
+          # covered the document-trailing comment region. Emit all regions.
           regions
+        else
+          # Raw-block emission: check each region against emitter output.
+          regions.reject { |region| region_already_emitted?(region, analysis) }
         end
 
         return if emittable_regions.empty?
