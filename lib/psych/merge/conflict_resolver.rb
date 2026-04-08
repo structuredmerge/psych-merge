@@ -1417,7 +1417,10 @@ module Psych
         end
 
         last_content_line = effective_end_line(fallback_node, analysis)
-        previous_end_line = last_content_line
+        # Use the deflated line so interstitial blank-line emission covers
+        # the gap between the last YAML content and the first trailing
+        # comment region (Psych inflates end_line to EOF).
+        previous_end_line = deflated_content_end_line(last_content_line, analysis)
 
         regions.each do |region|
           if previous_end_line && region.respond_to?(:start_line) && region.start_line
@@ -1483,16 +1486,41 @@ module Psych
 
       def document_trailing_regions_for(augmenter, analysis, fallback_node)
         last_content_line = effective_end_line(fallback_node, analysis)
+        # Psych reports the last node's end_line as the end of the document,
+        # which can include trailing comment lines. Scan backward to find the
+        # actual last YAML-content line so orphan comment regions inside the
+        # inflated range are not filtered out.
+        last_yaml_line = deflated_content_end_line(last_content_line, analysis)
         regions = Array(augmenter&.orphan_regions).select do |region|
           next false unless region && !region.empty?
-          next true unless last_content_line
+          next true unless last_yaml_line
 
-          region.respond_to?(:start_line) && region.start_line && region.start_line > last_content_line
+          region.respond_to?(:start_line) && region.start_line && region.start_line > last_yaml_line
         end
 
         postlude = augmenter&.postlude_region
         regions << postlude if postlude && !postlude.empty?
         regions.sort_by { |region| region.start_line || 0 }
+      end
+
+      # Walk backward from +end_line+ to find the last line that contains
+      # actual YAML content (not a full-line comment or blank line).
+      # Returns the original +end_line+ when no comment tracker is available
+      # or when no deflation is needed.
+      def deflated_content_end_line(end_line, analysis)
+        return end_line unless end_line
+        return end_line unless analysis.respond_to?(:comment_tracker)
+
+        tracker = analysis.comment_tracker
+        return end_line unless tracker
+
+        line = end_line
+        while line >= 1
+          break unless tracker.blank_line?(line) || tracker.full_line_comment?(line)
+          line -= 1
+        end
+
+        line >= 1 ? line : end_line
       end
 
       def node_content_start_line(node)

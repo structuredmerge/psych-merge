@@ -126,5 +126,12 @@ RSpec.describe "Psych reproducible merge" do
         add_template_only_nodes: true,
       }
     end
+
+    context "when destination preference merges preserve trailing comments present in both files" do
+      it_behaves_like "a reproducible merge", "17_destination_preference_trailing_comments_preserved", {
+        preference: :destination,
+        add_template_only_nodes: true,
+      }
+    end
   end
 end
