@@ -28,7 +28,6 @@ I've summarized my thoughts in [this blog post](https://dev.to/galtzo/hostile-ta
 
 ## 🌻 Synopsis
 
-
 Psych::Merge is a standalone Ruby module that intelligently merges two versions of a YAML file using Psych AST analysis. It's like a smart "git merge" specifically designed for YAML configuration files. Built on top of [ast-merge][ast-merge], it shares the same architecture as [prism-merge][prism-merge] for Ruby source files.
 
 ### Key Features
@@ -334,7 +333,6 @@ NOTE: Be prepared to track down certs for signed gems and add them the same way 
 
 ## ⚙️ Configuration
 
-
 ### Signature Match Preference
 
 Control which version to use when nodes have matching signatures but different content:
@@ -427,7 +425,6 @@ export PSYCH_MERGE_DEBUG=1
 ```
 
 ## 🔧 Basic Usage
-
 
 ### Merging Two YAML Files
 
