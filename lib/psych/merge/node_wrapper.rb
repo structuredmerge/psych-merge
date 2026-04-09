@@ -102,25 +102,25 @@ module Psych
       # Check if this wraps a mapping node
       # @return [Boolean]
       def mapping?
-        @node.is_a?(::Psych::Nodes::Mapping)
+        NodeTypeNormalizer.canonical_type(@node.class.name.split("::").last.downcase, :psych) == :mapping
       end
 
       # Check if this wraps a sequence node
       # @return [Boolean]
       def sequence?
-        @node.is_a?(::Psych::Nodes::Sequence)
+        NodeTypeNormalizer.canonical_type(@node.class.name.split("::").last.downcase, :psych) == :sequence
       end
 
       # Check if this wraps a scalar node
       # @return [Boolean]
       def scalar?
-        @node.is_a?(::Psych::Nodes::Scalar)
+        NodeTypeNormalizer.canonical_type(@node.class.name.split("::").last.downcase, :psych) == :scalar
       end
 
       # Check if this wraps an alias node
       # @return [Boolean]
       def alias?
-        @node.is_a?(::Psych::Nodes::Alias)
+        NodeTypeNormalizer.canonical_type(@node.class.name.split("::").last.downcase, :psych) == :alias
       end
 
       # Get the anchor name if this node has one
@@ -254,26 +254,22 @@ module Psych
       private
 
       def compute_signature(node)
-        case node
-        when ::Psych::Nodes::Mapping
-          # Signature based on anchor and keys
+        node_type = NodeTypeNormalizer.canonical_type(node.class.name.split("::").last.downcase, :psych)
+        case node_type
+        when :mapping
           keys = extract_mapping_keys(node)
           [:mapping, node.anchor, keys.sort]
-        when ::Psych::Nodes::Sequence
-          # Signature based on anchor and first few items for stability
+        when :sequence
           [:sequence, node.anchor, node.children&.length || 0]
-        when ::Psych::Nodes::Scalar
-          # Signature based on value and anchor
+        when :scalar
           [:scalar, node.anchor, node.value]
-        when ::Psych::Nodes::Alias
-          # Signature based on the anchor it references
+        when :alias
           [:alias, node.anchor]
-        when ::Psych::Nodes::Document
-          # Documents are matched by their root content type
+        when :document
           root = node.children&.first
           root_type = root&.class&.name&.split("::")&.last
           [:document, root_type]
-        when ::Psych::Nodes::Stream
+        when :stream
           [:stream]
         end
       end
@@ -285,7 +281,7 @@ module Psych
         i = 0
         while i < mapping_node.children.length
           key_node = mapping_node.children[i]
-          if key_node.is_a?(::Psych::Nodes::Scalar)
+          if NodeTypeNormalizer.canonical_type(key_node.class.name.split("::").last.downcase, :psych) == :scalar
             keys << key_node.value
           end
           i += 2
@@ -294,7 +290,7 @@ module Psych
       end
 
       def extract_key_name(key_node)
-        return unless key_node.is_a?(::Psych::Nodes::Scalar)
+        return unless NodeTypeNormalizer.canonical_type(key_node.class.name.split("::").last.downcase, :psych) == :scalar
 
         key_node.value
       end
