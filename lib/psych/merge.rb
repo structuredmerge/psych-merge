@@ -2,6 +2,7 @@
 
 # External gems
 require "psych"
+require "tree_haver"
 require "version_gem"
 require "set"
 
@@ -94,6 +95,7 @@ module Psych
     autoload :FileAnalysis, "psych/merge/file_analysis"
     autoload :MappingEntry, "psych/merge/file_analysis"
     autoload :MergeResult, "psych/merge/merge_result"
+    autoload :NodeTypeNormalizer, "psych/merge/node_type_normalizer"
     autoload :NodeWrapper, "psych/merge/node_wrapper"
     autoload :ConflictResolver, "psych/merge/conflict_resolver"
     autoload :PartialTemplateMerger, "psych/merge/partial_template_merger"

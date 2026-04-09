@@ -22,6 +22,9 @@ module Psych
       # @return [Psych::Nodes::Stream, nil] Parsed AST
       attr_reader :ast
 
+      # @return [TreeHaver::Backends::Psych::Tree, nil] TreeHaver tree (for future use)
+      attr_reader :tree
+
       # @return [Array] Parse errors if any
       attr_reader :errors
 
@@ -208,10 +211,12 @@ module Psych
       end
 
       def parse_yaml
-        @ast = ::Psych.parse_stream(@source)
+        @tree = TreeHaver.parser_for(:yaml).parse(@source)
+        @ast = @tree.root_node.inner_node
       rescue ::Psych::SyntaxError => e
         @errors << e
         @ast = nil
+        @tree = nil
         # Re-raise to allow SmartMergerBase to wrap with appropriate error type
         raise
       end
