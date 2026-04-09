@@ -48,6 +48,7 @@ module Psych
       # @param remove_missing [Boolean] Whether to remove destination items not in template
       # @param when_missing [Symbol] Behavior when key path not found (:skip, :add)
       # @param recursive [Boolean] Whether to recursively merge nested structures
+
       private
 
       def create_analysis(content)

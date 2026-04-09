@@ -1191,7 +1191,7 @@ module Psych
         end
 
         emit_removed_destination_node_inline_comments(node, analysis)
-        return unless @emitter.lines.length > before_count
+        return if @emitter.lines.length <= before_count
 
         effective_end_line(node, analysis, next_node: next_node) || content_start_line
       end
@@ -1371,7 +1371,7 @@ module Psych
           boundary -= 1 while boundary >= 1 && analysis.comment_tracker.blank_line?(boundary)
         end
 
-        [item.end_line, [boundary, item.start_line].max].min
+        item.end_line.clamp(..[boundary, item.start_line].max)
       end
 
       def build_next_node_lookup(nodes, fallback_next_node: nil)
@@ -1600,7 +1600,7 @@ module Psych
           line -= 1
         end
 
-        line >= 1 ? line : end_line
+        (line >= 1) ? line : end_line
       end
 
       def node_content_start_line(node)

@@ -2343,9 +2343,12 @@ RSpec.describe Psych::Merge::SmartMerger do
 
     context "with add_template_only_nodes: true (default sequence behavior)" do
       it "adds template-only items to a dest block sequence" do
-        merger = described_class.new(template_block, dest_block_one,
+        merger = described_class.new(
+          template_block,
+          dest_block_one,
           preference: :destination,
-          add_template_only_nodes: true)
+          add_template_only_nodes: true,
+        )
         result = merger.merge
         expect(result).to include("ISC")
         expect(result).to include("Apache-2.0")
@@ -2355,10 +2358,13 @@ RSpec.describe Psych::Merge::SmartMerger do
 
     context "with add_template_only_sequence_items: false (user-locked sequences)" do
       it "does NOT add template-only items to a dest block sequence" do
-        merger = described_class.new(template_block, dest_block_one,
+        merger = described_class.new(
+          template_block,
+          dest_block_one,
           preference: :destination,
           add_template_only_nodes: true,
-          add_template_only_sequence_items: false)
+          add_template_only_sequence_items: false,
+        )
         result = merger.merge
         expect(result).to include("ISC")
         expect(result).not_to include("Apache-2.0")
@@ -2366,10 +2372,13 @@ RSpec.describe Psych::Merge::SmartMerger do
       end
 
       it "does NOT add template-only items to a dest flow sequence" do
-        merger = described_class.new(template_flow, dest_flow_one,
+        merger = described_class.new(
+          template_flow,
+          dest_flow_one,
           preference: :destination,
           add_template_only_nodes: true,
-          add_template_only_sequence_items: false)
+          add_template_only_sequence_items: false,
+        )
         result = merger.merge
         expect(result).to include("ISC")
         expect(result).not_to include("Apache-2.0")
@@ -2388,10 +2397,13 @@ RSpec.describe Psych::Merge::SmartMerger do
           licenses:
             - ISC
         YAML
-        merger = described_class.new(template, dest,
+        merger = described_class.new(
+          template,
+          dest,
           preference: :destination,
           add_template_only_nodes: true,
-          add_template_only_sequence_items: false)
+          add_template_only_sequence_items: false,
+        )
         result = merger.merge
         expect(result).to include("new_key: added_by_template")
         expect(result).to include("ISC")
@@ -2403,9 +2415,12 @@ RSpec.describe Psych::Merge::SmartMerger do
       it "does not duplicate keys when destination contains emoji values" do
         template = "name: default"
         dest = "emoji: \"🪙\"\nname: custom"
-        merger = described_class.new(template, dest,
+        merger = described_class.new(
+          template,
+          dest,
           preference: :destination,
-          add_template_only_nodes: true)
+          add_template_only_nodes: true,
+        )
         result = merger.merge
         expect(result.scan("name:").length).to eq(1)
       end
@@ -2413,8 +2428,11 @@ RSpec.describe Psych::Merge::SmartMerger do
       it "preserves emoji values in destination" do
         template = "key: template"
         dest = "key: \"🍲 special\""
-        merger = described_class.new(template, dest,
-          preference: :destination)
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :destination,
+        )
         result = merger.merge
         expect(result).to include("🍲 special")
       end
@@ -2422,9 +2440,12 @@ RSpec.describe Psych::Merge::SmartMerger do
       it "handles multiple emoji without duplicating keys" do
         template = "x: \"1\"\ny: \"2\""
         dest = "e1: \"🍲\"\ne2: \"🪙\"\nx: a\ny: b"
-        merger = described_class.new(template, dest,
+        merger = described_class.new(
+          template,
+          dest,
           preference: :destination,
-          add_template_only_nodes: true)
+          add_template_only_nodes: true,
+        )
         result = merger.merge
         expect(result.scan("x:").length).to eq(1)
         expect(result.scan("y:").length).to eq(1)
@@ -2433,9 +2454,12 @@ RSpec.describe Psych::Merge::SmartMerger do
       it "handles CJK characters without duplicating keys" do
         template = "lang: en"
         dest = "greeting: \"こんにちは\"\nlang: ja"
-        merger = described_class.new(template, dest,
+        merger = described_class.new(
+          template,
+          dest,
           preference: :destination,
-          add_template_only_nodes: true)
+          add_template_only_nodes: true,
+        )
         result = merger.merge
         expect(result.scan("lang:").length).to eq(1)
       end
