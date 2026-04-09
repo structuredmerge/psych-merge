@@ -308,7 +308,7 @@ RSpec.describe Psych::Merge::CommentTracker do
     end
   end
 
-  describe "#leading_comments_before" do
+  describe "#leading_comments_before (gap and preamble)" do
     it "finds a comment immediately above the node" do
       source = <<~YAML
         # header comment

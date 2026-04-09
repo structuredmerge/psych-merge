@@ -320,10 +320,10 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(augmenter.postlude_region).to be_nil
     end
 
-    context "shared example compliance" do
+    context "when checking shared example compliance" do
       let(:analysis) { described_class.new(yaml) }
 
-      context "for a normalized region" do
+      context "with a normalized region" do
         let(:comment_region) { analysis.comment_region_for_range(1..1, kind: :leading) }
         let(:expected_region_kind) { :leading }
         let(:expected_region_content) { "Header comment" }
@@ -334,7 +334,7 @@ RSpec.describe Psych::Merge::FileAnalysis do
         it_behaves_like "Ast::Merge::Comment::Region"
       end
 
-      context "for the passive augmenter" do
+      context "with the passive augmenter" do
         let(:comment_augmenter) { analysis.comment_augmenter }
         let(:augmenter_owner) { analysis.statements.first }
         let(:expected_capability_predicate) { :source_augmented? }
@@ -668,7 +668,7 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(entry.inline_comment_region).to be_nil
     end
 
-    context "shared example compliance" do
+    context "when checking shared example compliance" do
       let(:comment_attachment) { entry.comment_attachment }
       let(:expected_attachment_owner) { entry }
       let(:expected_leading_content) { "Leading comment" }

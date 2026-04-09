@@ -155,7 +155,7 @@ module Psych
         signatures = nodes.map { |node| comment_region_node_signature(node) }
 
         (1..(signatures.length / 2)).each do |segment_length|
-          next unless (signatures.length % segment_length).zero?
+          next if (signatures.length % segment_length).nonzero?
 
           segment = signatures.first(segment_length)
           repeats = signatures.length / segment_length

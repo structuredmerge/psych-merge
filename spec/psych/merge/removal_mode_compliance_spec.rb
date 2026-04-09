@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+# rubocop:disable RSpec/SpecFilePathFormat
+
 RSpec.describe Psych::Merge::SmartMerger do
   it_behaves_like "Ast::Merge::RemovalModeCompliance" do
     let(:merger_class) { described_class }
@@ -84,3 +86,5 @@ RSpec.describe Psych::Merge::SmartMerger do
     end
   end
 end
+
+# rubocop:enable RSpec/SpecFilePathFormat

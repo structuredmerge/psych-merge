@@ -1114,7 +1114,7 @@ module Psych
         end
 
         return unless entry.respond_to?(:start_line) && entry.start_line
-        return unless entry.start_line < content_start_line
+        return if entry.start_line >= content_start_line
 
         lines = []
         (entry.start_line...content_start_line).each do |line_num|
@@ -1318,7 +1318,7 @@ module Psych
         end
 
         if item.sequence?
-          return item.sequence_items(comment_tracker: analysis.comment_tracker).each_with_index.each_with_object(::Set.new) do |(child, idx), observations|
+          return item.sequence_items(comment_tracker: analysis.comment_tracker).each_with_object(::Set.new).with_index do |(child, observations), idx|
             observations.merge(sequence_item_observations(child, analysis, path + [idx]))
           end
         end
@@ -1388,7 +1388,7 @@ module Psych
         return unless node.respond_to?(:end_line) && node.end_line
 
         end_line = node.end_line
-        return end_line unless next_node && next_node.respond_to?(:start_line) && next_node.start_line
+        return end_line unless next_node&.respond_to?(:start_line) && next_node.start_line
 
         next_effective_start = effective_start_line(next_node, analysis)
         boundary = (next_effective_start || next_node.start_line) - 1
@@ -1396,7 +1396,7 @@ module Psych
           boundary -= 1 while boundary >= 1 && analysis.comment_tracker.blank_line?(boundary)
         end
 
-        [end_line, [boundary, node_content_start_line(node)].max].min
+        [boundary, node_content_start_line(node)].max.clamp(..end_line)
       end
 
       def preferred_emitted_end_line(node, effective_end_line)
@@ -1617,7 +1617,7 @@ module Psych
         return unless node
 
         leading_region = node_leading_comment_region(node, analysis)
-        return leading_region.start_line if leading_region && leading_region.start_line
+        return leading_region&.start_line if leading_region&.start_line
         node.start_line if node.respond_to?(:start_line) && node.start_line
       end
 
@@ -1651,7 +1651,7 @@ module Psych
         return unless node
 
         return node.comment_attachment if node.respond_to?(:comment_attachment)
-        return unless analysis && analysis.respond_to?(:comment_attachment_for)
+        return unless analysis&.respond_to?(:comment_attachment_for)
 
         analysis.comment_attachment_for(node, line_num: node_content_start_line(node))
       end

@@ -94,7 +94,7 @@ RSpec.describe Psych::Merge::NodeWrapper do
       expect(attachment.inline_region&.normalized_content).to eq("inline note")
     end
 
-    context "shared example compliance" do
+    context "when checking shared example compliance" do
       let(:leading) do
         [{line: 1, indent: 0, text: "Header", full_line: true, raw: "# Header"}]
       end
@@ -113,7 +113,7 @@ RSpec.describe Psych::Merge::NodeWrapper do
         )
       end
 
-      context "for the attachment" do
+      context "with the attachment" do
         let(:comment_attachment) { wrapper.comment_attachment }
         let(:expected_attachment_owner) { wrapper }
         let(:expected_leading_content) { "Header" }
@@ -126,7 +126,7 @@ RSpec.describe Psych::Merge::NodeWrapper do
         it_behaves_like "Ast::Merge::Comment::Attachment"
       end
 
-      context "for the inline region" do
+      context "with the inline region" do
         let(:comment_region) { wrapper.inline_comment_region }
         let(:expected_region_kind) { :inline }
         let(:expected_region_content) { "inline note" }
