@@ -554,7 +554,10 @@ module Psych
         if template_node.mapping? && dest_node.mapping?
           return false if sequence_item_mapping_reorder_requires_whole_item?(template_node, dest_node)
 
-          !flow_mapping?(template_node) && !flow_mapping?(dest_node)
+          # Empty flow mappings (e.g. `files: {}`) are safe to recurse into:
+          # the inline `{}` carries no content to preserve, and template-only
+          # child nodes can be added as block entries after the key line.
+          !flow_mapping?(template_node) && (!flow_mapping?(dest_node) || empty_flow_mapping?(dest_node))
         elsif template_node.sequence? && dest_node.sequence?
           # Flow sequences (e.g., `key: [val1, val2]`) occupy the same physical
           # line as their key.  Recursing into them would emit the key line via
@@ -596,6 +599,17 @@ module Psych
         key_start_line == value_start_line
       end
 
+      # True when node is a flow mapping whose value contains no entries (e.g. `key: {}`).
+      # Such nodes can be safely converted to block style by recursing into them.
+      def empty_flow_mapping?(node)
+        return false unless flow_mapping?(node)
+        return false unless node.respond_to?(:value) && node.value
+
+        node.value.mapping_entries.empty?
+      rescue StandardError
+        false
+      end
+
       def sequence_item_mapping_reorder_requires_whole_item?(template_node, dest_node)
         return false unless sequence_item_mapping_node?(template_node)
         return false unless sequence_item_mapping_node?(dest_node)
@@ -624,7 +638,11 @@ module Psych
         # Preserve the destination prelude (leading comments / blank lines) for
         # recursively merged mapping entries, then emit the key line.
         if dest_node.respond_to?(:key) && dest_node.key
-          if preference_for_pair(template_node, dest_node) == :destination
+          # For empty flow mappings (e.g. `files: {}`), the dest key line includes
+          # the inline `{}`.  Emitting it as-is and then adding block children
+          # would produce invalid YAML.  Fall through to the template key line
+          # so children are emitted as proper block entries.
+          if preference_for_pair(template_node, dest_node) == :destination && !empty_flow_mapping?(dest_node)
             emit_mapping_entry_prelude(dest_node, @dest_analysis)
             emit_mapping_entry_key_line(dest_node, @dest_analysis)
           else
