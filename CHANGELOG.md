@@ -174,8 +174,6 @@ Please file a bug if you notice a violation of semantic versioning.
 - **ConflictResolver**: Added `**options` for forward compatibility
   - Now passes `match_refiner` to base class instead of storing locally
 - **MergeResult**: Added `**options` for forward compatibility
-- Updated documentation on hostile takeover of RubyGems
-  - https://dev.to/galtzo/hostile-takeover-of-rubygems-my-thoughts-5hlo
 
 ### Fixed
 
