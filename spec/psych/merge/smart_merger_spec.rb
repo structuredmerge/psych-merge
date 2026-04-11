@@ -427,7 +427,7 @@ RSpec.describe Psych::Merge::SmartMerger do
           authors:
             - given-names: "Peter H."
               family-names: "Boling"
-              email: "floss@glatzo.com"
+              email: "floss@galtzo.com"
               affiliation: "galtzo.com"
               orcid: 'https://orcid.org/0009-0008-8519-441X'
         YAML
@@ -450,7 +450,7 @@ RSpec.describe Psych::Merge::SmartMerger do
 
         expect(result.scan("given-names:").size).to eq(1)
         expect(result).to include('given-names: "Peter H."')
-        expect(result).to include('email: "floss@glatzo.com"')
+        expect(result).to include('email: "floss@galtzo.com"')
         expect(result).not_to include("Peter Hurn")
       end
 
