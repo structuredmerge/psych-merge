@@ -19,14 +19,12 @@ module Psych
     #   # Full-line comment
     #   key: value # Inline comment
     class CommentTracker < Ast::Merge::Comment::HashTrackerBase
-      # Regex to match inline comments (comment after YAML content)
-      INLINE_COMMENT_REGEX = /\s+#\s?(.*)$/
-
       # Initialize comment tracker by scanning the source
       #
       # @param source [String] YAML source code
       def initialize(source)
         @source = source
+        @line_parser = Ast::Merge::Comment::QuotedHashLineParser.new
         super(source.lines.map(&:chomp))
       end
 
@@ -37,34 +35,25 @@ module Psych
 
         @lines.each_with_index do |line, idx|
           line_num = idx + 1
+          parsed = @line_parser.parse(line)
+          next unless parsed
 
-          # Check for full-line comment first
-          if line =~ FULL_LINE_COMMENT_REGEX
+          if parsed.full_line?
             comments << {
               line: line_num,
-              indent: ::Regexp.last_match(1).length,
-              text: ::Regexp.last_match(2).rstrip,
+              indent: parsed.indent,
+              text: parsed.text,
               full_line: true,
-              raw: line,
+              raw: parsed.raw,
             }
-          # Check for inline comment (after YAML content)
-          elsif line =~ INLINE_COMMENT_REGEX
-            # Make sure it's not inside a quoted string
-            # Simple heuristic: count quotes before the #
-            before_hash = line.split("#").first
-            single_quotes = before_hash.count("'")
-            double_quotes = before_hash.count('"')
-
-            # If quotes are balanced, it's likely a real comment
-            if single_quotes.even? && double_quotes.even?
-              comments << {
-                line: line_num,
-                indent: line.index("#"),
-                text: ::Regexp.last_match(1).rstrip,
-                full_line: false,
-                raw: line,
-              }
-            end
+          elsif parsed.inline?
+            comments << {
+              line: line_num,
+              indent: parsed.column,
+              text: parsed.text,
+              full_line: false,
+              raw: parsed.raw,
+            }
           end
         end
 
