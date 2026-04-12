@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>
+  File: CHANGELOG
+  
+    &mdash; Documentation by YARD 0.9.39
+  
+</title>
+
+  <link rel="stylesheet" href="css/style.css" type="text/css" />
+
+  <link rel="stylesheet" href="css/common.css" type="text/css" />
+
+<script type="text/javascript">
+  pathId = "CHANGELOG";
+  relpath = '';
+</script>
+
+
+  <script type="text/javascript" charset="utf-8" src="js/jquery.js"></script>
+
+  <script type="text/javascript" charset="utf-8" src="js/app.js"></script>
+
+
+  </head>
+  <body>
+    <div class="nav_wrap">
+      <iframe id="nav" src="file_list.html?1"></iframe>
+      <div id="resizer"></div>
+    </div>
+
+    <div id="main" tabindex="-1">
+      <div id="header">
+        <div id="menu">
+  
+    <a href="_index.html">Index</a> &raquo; 
+    <span class="title">File: CHANGELOG</span>
+  
+</div>
+
+        <div id="search">
+  
+    <a class="full_list_link" id="class_list_link"
+        href="class_list.html">
+
+        <svg width="24" height="24">
+          <rect x="0" y="4" width="24" height="4" rx="1" ry="1"></rect>
+          <rect x="0" y="12" width="24" height="4" rx="1" ry="1"></rect>
+          <rect x="0" y="20" width="24" height="4" rx="1" ry="1"></rect>
+        </svg>
+    </a>
+  
+</div>
+        <div class="clear"></div>
+      </div>
+
+      <div id="content"><div id='filecontents'><h1 id="changelog">Changelog</h1>
+
+<p><a href="https://semver.org/spec/v2.0.0.html"><img src="https://img.shields.io/badge/semver-2.0.0-FFDD67.svg?style=flat" alt="SemVer 2.0.0"></a> <a href="https://keepachangelog.com/en/1.0.0/"><img src="https://img.shields.io/badge/keep--a--changelog-1.0.0-FFDD67.svg?style=flat" alt="Keep-A-Changelog 1.0.0"></a></p>
+
+<p>All notable changes to this project will be documented in this file.</p>
+
+<p>The format is based on <a href="https://keepachangelog.com/en/1.0.0/">Keep a Changelog</a>,<br>
+and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>,<br>
+and <a href="https://tom.preston-werner.com/2022/05/23/major-version-numbers-are-not-sacred.html">yes</a>, platform and engine support are part of the <a href="https://github.com/semver/semver/issues/716#issuecomment-869336139">public API</a>.<br>
+Please file a bug if you notice a violation of semantic versioning.</p>
+
+<h2 id="unreleased"><a href="https://github.com/kettle-rb/psych-merge/compare/v1.0.0...HEAD">Unreleased</a></h2>
+
+<h3 id="added">Added</h3>
+
+<ul>
+  <li>Added shared <code>Ast::Merge::Comment</code> region, attachment, and augmenter adoption over Psych comment tracking, including normalized analysis and wrapper attachment APIs plus shared-example compliance coverage</li>
+  <li>Added <code>add_template_only_sequence_items</code> option to <code>SmartMerger</code> for preserving template-only list items during merge</li>
+</ul>
+
+<h3 id="changed">Changed</h3>
+
+<ul>
+  <li>Adopted the shared <code>Ast::Merge::Layout</code> contract for YAML document gaps, including shared layout compliance coverage over top-level mapping/sequence ownership</li>
+  <li>Rebased <code>Psych::Merge::PartialTemplateMerger</code> onto the shared <code>Ast::Merge::KeyPathPartialTemplateMergerBase</code>, leaving YAML-specific child traversal, serialization, and <code>SmartMerger</code> wiring local while moving key-path navigation and missing-path insertion into the shared substrate</li>
+  <li>Rebased <code>Psych::Merge::CommentTracker</code> onto the shared<br>
+<code>Ast::Merge::Comment::HashTrackerBase</code>, keeping YAML-specific <code>#</code> extraction<br>
+heuristics and owner resolution local</li>
+  <li>
+<strong>BREAKING</strong>: <code>ConflictResolver#merge_nodes_to_emitter</code> signature simplified to<br>
+<code>merge_nodes_to_emitter(template_nodes, dest_nodes, template_by_sig, depth: 0)</code>.<br>
+Removed <code>processed_template_sigs</code>, <code>processed_dest_sigs</code>, and <code>dest_by_sig</code><br>
+parameters. Signature matching now uses cursor-based positional matching<br>
+(consumed indices + per-signature cursor) internally, ensuring multiple nodes<br>
+with the same signature are matched 1:1 in order rather than collapsed.<br>
+The <code>nested_dest_by_sig</code> build in <code>emit_recursive_mapping_merge</code> was also<br>
+removed as dead code.</li>
+  <li>Preserved normalized comment regions and attachments through YAML emission and merge paths while keeping document boundaries, recursive comment-heavy fixtures, and destination-leading / inline ownership stable under template preference</li>
+  <li>Clarified the YAML removal-mode baseline so <code>remove_template_missing_nodes: true</code> preserves or promotes comment regions for removed destination-only mappings instead of silently dropping them</li>
+  <li>Adopted <code>Ast::Merge::TrailingGroups::DestIterate</code> plus shared deferred-flush ordering for mappings and sequence items so template-only YAML additions keep their template-relative position even when destination keys or list items are reordered</li>
+  <li>
+<code>Psych::Merge::Emitter</code> now reuses the shared <code>EmitterBase</code> comment-region and<br>
+attachment emission flow again, keeping only YAML-local deduplication and<br>
+tracked-column inline alignment behavior in the Psych layer</li>
+  <li>Upgraded <code>tree_haver</code> dependency to <code>~&gt; 6.0</code>
+</li>
+</ul>
+
+<h3 id="deprecated">Deprecated</h3>
+
+<h3 id="removed">Removed</h3>
+
+<h3 id="fixed">Fixed</h3>
+
+<ul>
+  <li>Fixed <code>.kettle-jem.yml</code> header comment duplication: file-header comments (starting at line 1, separated from the first key by a blank line) are now treated as preamble via upstream ast-merge change, preventing duplication when template-only keys are inserted before the first key</li>
+  <li>
+<code>ConflictResolver#merge_nodes_to_emitter</code> now preserves inter-node blank lines<br>
+from the destination, so visual spacing between YAML sections (e.g., between<br>
+<code>name:</code> and <code>on:</code> in GitHub Actions workflows) is maintained after merge</li>
+  <li>Fix recursive sequence item matching for mapping entries identified by<br>
+globally unique scalar keys such as <code>value</code> and <code>orcid</code>, preferring stable<br>
+identities over mutable fields like <code>email</code> so citation-style YAML sequences<br>
+merge 1:1 instead of duplicating author entries</li>
+  <li>Fix template-preference document boundary emission so top-level YAML prelude /<br>
+postlude comment regions and matched mapping-entry preludes are emitted from<br>
+the template side instead of being dropped or replaced by destination-only<br>
+boundaries in <code>.kettle-jem.yml</code>-style files</li>
+  <li>Fix top-level removal-mode separator-gap handling so promoted comments from a<br>
+removed destination-only mapping preserve the intended blank line before the<br>
+following destination comment block, while recursive sequence-item removal<br>
+continues to collapse item-spacing as required by the existing reproducible<br>
+fixture contract</li>
+  <li>Fix destination-preference document postlude emission so template-only<br>
+trailing footer comment blocks (such as the instructional footer in<br>
+<code>.kettle-jem.yml</code>-style files) are preserved when<br>
+<code>add_template_only_nodes: true</code>
+</li>
+  <li>Fix flow sequence duplication in recursive merge. YAML entries with flow sequence<br>
+values (e.g., <code>github: [pboling]</code>) were duplicated because <code>can_merge_recursively?</code><br>
+returned <code>true</code> for sequences, causing <code>emit_recursive_merge</code> to emit the key line,<br>
+then <code>emit_sequence_item</code> to re-emit the same physical line. Flow sequences (where<br>
+the value occupies the same line as the key) are now treated atomically.</li>
+  <li>Fix leading comment association when blank lines separate comments from the<br>
+first mapping entry. <code>CommentTracker#leading_comments_before</code> now skips blank lines<br>
+when searching upward for comments. <code>emit_node</code> now emits the blank line separator<br>
+between comments and the node when one existed in the original source.<br>
+Reported via kettle-jem self-test against <code>.github/FUNDING.yml</code>.</li>
+  <li>Fix recursive sequence emission so a template or destination item no longer<br>
+swallows the next sibling’s leading comment block from its physical line<br>
+range, preventing duplicated workflow-style section comments when inserting<br>
+template-only items.</li>
+  <li>Fix observation-based recursive sequence matching for composite items such as<br>
+nested sequences, allowing stable inner scalars to match outer siblings 1:1<br>
+so comment ownership and removal-mode promotion stay attached to the correct<br>
+item.</li>
+  <li>Fix document-level comment-only destination headers so, when the preferred<br>
+document has no nodes, the header is emitted once as a prelude instead of<br>
+being duplicated again as a trailing postlude after template-only additions.</li>
+  <li>Fix wrapped mapping / sequence value line ranges so a node no longer claims a<br>
+following sibling’s leading comment block in <code>.kettle-jem.yml</code>-style files,<br>
+preventing duplicated commented sections when <code>patterns:</code> is followed by a<br>
+commented <code>files:</code> section.</li>
+  <li>Fix recursive YAML sequence emission so matched workflow-style items keep<br>
+parent-owned blank separators stable when destination-only nested mappings<br>
+(such as a preserved <code>with:</code> block) survive the merge, preventing repeated<br>
+template runs from growing that blank-line region on each pass.</li>
+  <li>Fix supplemental document postlude deduplication so orphan regions already<br>
+owned by the preferred source are excluded regardless of their position<br>
+relative to <code>last_content_line</code>. <code>emit_supplemental_document_postlude</code> now<br>
+builds <code>all_preferred_regions</code> by unioning <code>preferred_regions</code> with <em>all</em><br>
+orphan regions from the preferred augmenter; the <code>last_content_line</code> filter<br>
+is kept for emission ordering only. Complemented by dropping <code>:kind</code> from<br>
+<code>document_region_key</code> so <code>:orphan</code> vs <code>:postlude</code> kind mismatches no longer<br>
+defeat the deduplication set.</li>
+  <li>Fixed multi-byte character (emoji) handling — upstream <code>ast-merge</code> <code>byteslice</code> → <code>slice</code> fix prevents corruption when merging content with multi-byte characters</li>
+</ul>
+
+<h3 id="security">Security</h3>
+
+<h2 id="100---2026-02-19">
+<a href="https://github.com/kettle-rb/psych-merge/compare/3330d3309d6962a4e676aa1c43e4ca90dfd21dc4...v1.0.0">1.0.0</a> - 2026-02-19</h2>
+
+<ul>
+  <li>TAG: <a href="https://github.com/kettle-rb/psych-merge/tags/v1.0.0">v1.0.0</a>
+</li>
+  <li>COVERAGE: 91.92% – 921/1002 lines in 14 files</li>
+  <li>BRANCH COVERAGE: 73.00% – 311/426 branches in 14 files</li>
+  <li>97.39% documented</li>
+</ul>
+
+<h3 id="added-1">Added</h3>
+
+<ul>
+  <li>AGENTS.md</li>
+  <li>
+<code>Psych::Merge::DiffMapper</code> - Maps unified git diffs to YAML AST key paths
+    <ul>
+      <li>Inherits from <code>Ast::Merge::DiffMapperBase</code>
+</li>
+      <li>
+<code>#map_hunk_to_paths</code> - Maps diff hunks to YAML key paths (e.g., <code>["AllCops", "Exclude"]</code>)</li>
+      <li>
+<code>#create_analysis</code> - Creates <code>FileAnalysis</code> for YAML content</li>
+      <li>Tracks nested paths via indentation and MappingEntry location data</li>
+      <li>Groups consecutive changed lines by their containing YAML node</li>
+    </ul>
+  </li>
+  <li>
+<code>Psych::Merge::PartialTemplateMerger</code> - Merges partial YAML templates into specific key paths
+    <ul>
+      <li>Navigate to specific key paths (e.g., <code>["AllCops", "Exclude"]</code>) in destination</li>
+      <li>Merge template content at that location while preserving rest of document</li>
+      <li>
+<code>key_path:</code> - Array of keys/indices to navigate to target location</li>
+      <li>
+<code>add_missing:</code> - Whether to add template items not in destination (default: <code>true</code>)</li>
+      <li>
+<code>remove_missing:</code> - Whether to remove destination items not in template (default: <code>false</code>)</li>
+      <li>
+<code>when_missing:</code> - Behavior when key path not found (<code>:skip</code> or <code>:add</code>, default: <code>:skip</code>)</li>
+      <li>
+<code>recursive:</code> - Whether to recursively merge nested structures (default: <code>true</code>)</li>
+      <li>Returns <code>Result</code> object with <code>content</code>, <code>has_key_path</code>, <code>changed</code>, <code>stats</code>, <code>message</code>
+</li>
+    </ul>
+  </li>
+  <li>
+<code>Psych::Merge::SmartMerger</code> - New options for advanced merge control:
+    <ul>
+      <li>
+<code>recursive: true | false | Integer</code> - Control recursive merging of nested structures
+        <ul>
+          <li>
+<code>true</code> (default): Merge nested mappings/sequences recursively instead of replacing wholesale</li>
+          <li>
+<code>false</code>: Replace entire matched nodes (original behavior)</li>
+          <li>
+<code>Integer &gt; 0</code>: Maximum recursion depth</li>
+        </ul>
+      </li>
+      <li>
+<code>remove_template_missing_nodes: false</code> - When <code>true</code>, removes destination nodes not present in template</li>
+    </ul>
+  </li>
+  <li>
+<code>Psych::Merge::ConflictResolver</code> - Recursive merge implementation:
+    <ul>
+      <li>
+<code>#emit_recursive_merge</code> - Recursively merge matched nodes</li>
+      <li>
+<code>#emit_recursive_mapping_merge</code> - Merge nested mapping entries</li>
+      <li>
+<code>#emit_recursive_sequence_merge</code> - Merge sequences with union semantics</li>
+      <li>
+<code>#can_merge_recursively?</code> - Check if two nodes can be recursively merged</li>
+      <li>Handles both <code>MappingEntry</code> and raw <code>NodeWrapper</code> nodes</li>
+    </ul>
+  </li>
+  <li>
+<code>node_typing</code> parameter for per-node-type merge preferences
+    <ul>
+      <li>Enables <code>preference: { default: :destination, special_type: :template }</code> pattern</li>
+      <li>Works with custom merge_types assigned via node_typing lambdas</li>
+    </ul>
+  </li>
+  <li>
+<code>regions</code> and <code>region_placeholder</code> parameters for nested content merging</li>
+  <li>Initial release</li>
+</ul>
+
+<h3 id="changed-1">Changed</h3>
+
+<ul>
+  <li>appraisal2 v3.0.6</li>
+  <li>kettle-test v1.0.10</li>
+  <li>stone_checksums v1.0.3</li>
+  <li><a href="https://github.com/kettle-rb/ast-merge/releases/tag/v4.0.6">ast-merge v4.0.6</a></li>
+  <li><a href="https://github.com/kettle-rb/tree_haver/releases/tag/v5.0.5">tree_haver v5.0.5</a></li>
+  <li>tree_stump v0.2.0
+    <ul>
+      <li>fork no longer required, updates all applied upstream</li>
+    </ul>
+  </li>
+  <li>Updated documentation on hostile takeover of RubyGems
+    <ul>
+      <li>https://dev.to/galtzo/hostile-takeover-of-rubygems-my-thoughts-5hlo</li>
+    </ul>
+  </li>
+  <li>
+<strong>SmartMerger</strong>: Added <code>**options</code> for forward compatibility
+    <ul>
+      <li>Accepts additional options that may be added to base class in future</li>
+      <li>Passes all options through to <code>SmartMergerBase</code>
+</li>
+    </ul>
+  </li>
+  <li>
+<strong>ConflictResolver</strong>: Added <code>**options</code> for forward compatibility
+    <ul>
+      <li>Now passes <code>match_refiner</code> to base class instead of storing locally</li>
+    </ul>
+  </li>
+  <li>
+<strong>MergeResult</strong>: Added <code>**options</code> for forward compatibility</li>
+</ul>
+
+<h3 id="fixed-1">Fixed</h3>
+
+<ul>
+  <li>ConflictResolver now applies Hash-based per-node-type preferences via <code>node_typing</code>.</li>
+</ul>
+
+<h3 id="security-1">Security</h3>
+
+</div></div>
+
+      <div id="footer">
+  Generated on Sun Apr 12 11:49:42 2026 by
+  <a href="https://yardoc.org" title="Yay! A Ruby Documentation Tool" target="_parent">yard</a>
+  0.9.39 (ruby-4.0.2).
+</div>
+
+    </div>
+  </body>
+</html>
