@@ -6,7 +6,7 @@ require "ast/merge/rspec/shared_examples"
 RSpec.describe "psych comment behavior matrix", :yaml_parsing do
   extend Ast::Merge::RSpec::CommentBehaviorMatrixAdapters
 
-  include_examples "Ast::Merge::CommentBehaviorMatrix" do
+  it_behaves_like "Ast::Merge::CommentBehaviorMatrix" do
     hash_comment_line_based_comment_matrix_adapter(
       analysis_class: Psych::Merge::FileAnalysis,
       merger_class: Psych::Merge::SmartMerger,
