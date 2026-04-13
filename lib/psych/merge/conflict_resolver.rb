@@ -154,7 +154,10 @@ module Psych
 
         if emit_destination_postlude
           document_analysis, document_nodes = preferred_document_context(template_nodes, dest_nodes)
-          emit_document_prelude(document_analysis, nodes: document_nodes)
+          emit_document_prelude(
+            preferred_document_prelude_analysis(template_nodes, dest_nodes, document_analysis, document_nodes),
+            nodes: preferred_document_prelude_nodes(template_nodes, dest_nodes, document_analysis, document_nodes),
+          )
         end
 
         # Track consumed individual node indices (not just signatures) so that
@@ -404,6 +407,31 @@ module Psych
         return [@dest_analysis, dest_nodes] if default_preference == :template
 
         [@template_analysis, template_nodes]
+      end
+
+      def preferred_document_prelude_analysis(template_nodes, dest_nodes, document_analysis, document_nodes)
+        analysis, = preferred_document_prelude_context(template_nodes, dest_nodes, document_analysis, document_nodes)
+        analysis
+      end
+
+      def preferred_document_prelude_nodes(template_nodes, dest_nodes, document_analysis, document_nodes)
+        _, nodes = preferred_document_prelude_context(template_nodes, dest_nodes, document_analysis, document_nodes)
+        nodes
+      end
+
+      def preferred_document_prelude_context(template_nodes, dest_nodes, document_analysis, document_nodes)
+        return [document_analysis, document_nodes] unless @add_template_only_nodes
+        return [document_analysis, document_nodes] unless document_leading_regions_for(document_comment_augmenter_for(document_analysis), document_nodes, document_analysis).empty?
+
+        supplemental_analysis, supplemental_nodes = nonpreferred_document_context(template_nodes, dest_nodes)
+        supplemental_regions = document_leading_regions_for(
+          document_comment_augmenter_for(supplemental_analysis),
+          supplemental_nodes,
+          supplemental_analysis,
+        )
+        return [document_analysis, document_nodes] if supplemental_regions.empty?
+
+        [supplemental_analysis, supplemental_nodes]
       end
 
       def emit_supplemental_document_postlude(template_nodes:, dest_nodes:, preferred_analysis:)
@@ -1079,6 +1107,7 @@ module Psych
 
         emit_node_first_line(lines.shift, item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
         @emitter.emit_raw_lines(lines) if lines.any?
+        emit_node_trailing_comments(item, analysis)
       end
 
       # Emit a single node to the emitter
@@ -1115,6 +1144,7 @@ module Psych
               if lines.any?
                 @emitter.emit_raw_lines(lines)
               end
+              emit_node_trailing_comments(node, analysis)
             end
           end
         end
@@ -1138,7 +1168,10 @@ module Psych
           content_start_line += 1
         end
 
-        return if content_start_line > end_line
+        if content_start_line > end_line
+          emit_node_trailing_comments(entry, analysis)
+          return
+        end
 
         lines = []
         (content_start_line..end_line).each do |line_num|
@@ -1148,6 +1181,7 @@ module Psych
         if lines.any?
           @emitter.emit_raw_lines(lines)
         end
+        emit_node_trailing_comments(entry, analysis)
       end
 
       # Emit a freeze block
@@ -1775,6 +1809,13 @@ module Psych
         node.inline_comment_region
       end
 
+      def node_trailing_comment_region(node, analysis = nil)
+        attachment = resolved_comment_attachment(node, analysis)
+        return attachment.trailing_region if attachment&.respond_to?(:trailing_region)
+
+        nil
+      end
+
       def preferred_leading_comment_region(node, comment_source_node = nil, analysis: nil, comment_analysis: analysis)
         source_region = node_leading_comment_region(comment_source_node, comment_analysis) if comment_source_node
         return source_region if source_region && !source_region.empty?
@@ -1794,7 +1835,8 @@ module Psych
 
         source_leading = node_leading_comment_region(comment_source_node, comment_analysis)
         source_inline = node_inline_comment_region(comment_source_node, comment_analysis)
-        return comment_analysis if source_leading.equal?(region) || source_inline.equal?(region)
+        source_trailing = node_trailing_comment_region(comment_source_node, comment_analysis)
+        return comment_analysis if source_leading.equal?(region) || source_inline.equal?(region) || source_trailing.equal?(region)
 
         default_analysis
       end
@@ -1804,9 +1846,18 @@ module Psych
 
         source_leading = node_leading_comment_region(comment_source_node)
         source_inline = node_inline_comment_region(comment_source_node)
-        return comment_source_node if source_leading.equal?(region) || source_inline.equal?(region)
+        source_trailing = node_trailing_comment_region(comment_source_node)
+        return comment_source_node if source_leading.equal?(region) || source_inline.equal?(region) || source_trailing.equal?(region)
 
         default_node
+      end
+
+      def emit_node_trailing_comments(node, analysis)
+        trailing_region = node_trailing_comment_region(node, analysis)
+        return unless trailing_region && !trailing_region.empty?
+        return if region_already_emitted?(trailing_region, analysis)
+
+        @emitter.emit_comment_region(trailing_region, source_lines: analysis.lines)
       end
 
       def emit_interstitial_blank_lines(start_line, end_line, analysis)

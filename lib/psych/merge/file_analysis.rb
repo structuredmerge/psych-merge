@@ -80,10 +80,10 @@ module Psych
       #
       # @return [Ast::Merge::Comment::SupportStyle]
       def comment_support_style
-        @comment_support_style ||= Ast::Merge::Comment::SupportStyle.source_augmented_synthetic(
+        @comment_support_style ||= shared_comment_support_style(
           source: :psych_source,
-          capability: comment_capability.level,
           style: :hash_comment,
+          read_strategy: :source_augmented_synthetic,
         )
       end
 
@@ -201,42 +201,47 @@ module Psych
       # @param options [Hash] Additional attachment metadata
       # @return [Ast::Merge::Comment::Attachment]
       def comment_attachment_for(owner, line_num: nil, **options)
-        base_attachment = if owner.is_a?(MappingEntry) && line_num.nil? && options.empty?
+        base_attachment = if owner.is_a?(MappingEntry) && options.empty?
           mapping_entry_attachment(owner)
         else
           @comment_tracker.comment_attachment_for(owner, line_num: line_num, **options)
         end
 
-        merge_comment_attachment_with_layout(
+        shared_comment_attachment_for(
           owner,
-          base_attachment,
+          tracker_attachment: base_attachment,
           line_num: line_num,
           **options,
         )
       end
 
-      private
-
-      def comment_augmenter_default_owners
-        statements.select { |statement| statement.respond_to?(:start_line) && statement.respond_to?(:end_line) }
+      # @return [Symbol]
+      def comment_attachment_strategy
+        :tracker_layout_merge
       end
 
+      private
+
       def mapping_entry_attachment(owner)
+        augmenter_attachment = comment_augmenter(owners: [owner]).attachment_for(owner)
         comment_blocks = full_line_comment_blocks_before(owner.key.start_line || 1)
+        leading_comments = comment_blocks.last || []
+        floating_leading = leading_comments.any? && gap_before_comment_block?(leading_comments, owner.key.start_line || 1)
 
         Ast::Merge::Comment::Attachment.new(
           owner: owner,
-          leading_region: build_comment_region(:leading, comment_blocks.last || []),
+          leading_region: build_comment_region(:leading, leading_comments, floating: floating_leading),
           inline_region: build_comment_region(:inline, [inline_comment_node_at(owner.key.start_line || 1)].compact),
+          trailing_region: augmenter_attachment&.trailing_region,
           orphan_regions: comment_blocks[0...-1].map { |block| build_comment_region(:orphan, block) }.compact,
           metadata: {key_name: owner.key_name},
         )
       end
 
-      def build_comment_region(kind, comments)
+      def build_comment_region(kind, comments, floating: false)
         return if comments.empty?
 
-        Ast::Merge::Comment::Region.new(kind: kind, nodes: comments)
+        Ast::Merge::Comment::Region.new(kind: kind, nodes: comments, metadata: {floating: floating})
       end
 
       def inline_comment_node_at(line_num)
@@ -274,6 +279,13 @@ module Psych
 
         blocks.unshift(current_block.reverse) unless current_block.empty?
         blocks
+      end
+
+      def gap_before_comment_block?(comments, line_num)
+        return false if comments.empty?
+
+        last_comment_line = comments.last.line_number
+        ((last_comment_line + 1)...line_num).any? { |current_line| @lines[current_line - 1].to_s.strip.empty? }
       end
 
       def wrap_root_node(root)
