@@ -1107,7 +1107,7 @@ module Psych
 
         emit_node_first_line(lines.shift, item, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
         @emitter.emit_raw_lines(lines) if lines.any?
-        emit_node_trailing_comments(item, analysis)
+        emit_node_trailing_comments(item, analysis, next_node: next_node)
       end
 
       # Emit a single node to the emitter
@@ -1144,7 +1144,7 @@ module Psych
               if lines.any?
                 @emitter.emit_raw_lines(lines)
               end
-              emit_node_trailing_comments(node, analysis)
+              emit_node_trailing_comments(node, analysis, next_node: next_node)
             end
           end
         end
@@ -1169,7 +1169,7 @@ module Psych
         end
 
         if content_start_line > end_line
-          emit_node_trailing_comments(entry, analysis)
+          emit_node_trailing_comments(entry, analysis, next_node: next_node)
           return
         end
 
@@ -1181,7 +1181,7 @@ module Psych
         if lines.any?
           @emitter.emit_raw_lines(lines)
         end
-        emit_node_trailing_comments(entry, analysis)
+        emit_node_trailing_comments(entry, analysis, next_node: next_node)
       end
 
       # Emit a freeze block
@@ -1576,9 +1576,12 @@ module Psych
         return if fallback_node.nil?
 
         regions = document_trailing_regions_for(augmenter, analysis, fallback_node)
+        had_document_trailing_regions = regions.any?
+        last_node_trailing_region = node_trailing_comment_region(fallback_node, analysis)
+        regions = regions.reject { |region| same_comment_region?(region, last_node_trailing_region) }
 
         if regions.empty?
-          emit_trailing_lines_after_last_node(fallback_node, analysis)
+          emit_trailing_lines_after_last_node(fallback_node, analysis) unless had_document_trailing_regions || last_node_trailing_region
           return
         end
 
@@ -1588,18 +1591,11 @@ module Psych
         # comment region (Psych inflates end_line to EOF).
         previous_end_line = deflated_content_end_line(last_content_line, analysis)
 
-        # When the last document-level node was emitted as a raw block (not
-        # recursively merged), its inflated end_line range may already include
-        # trailing comment lines. Check the emitter output to avoid
-        # duplicating regions that were already emitted as raw content.
-        emittable_regions = if @last_document_node_recursively_merged
-          # Recursive merge: children were emitted individually and none
-          # covered the document-trailing comment region. Emit all regions.
-          regions
-        else
-          # Raw-block emission: check each region against emitter output.
-          regions.reject { |region| region_already_emitted?(region, analysis) }
-        end
+        # Even when the last document node was recursively merged, nested raw-line
+        # emission can still already include trailing orphan regions. Always
+        # filter against the current emitter tail before appending document
+        # trailing regions.
+        emittable_regions = regions.reject { |region| region_already_emitted?(region, analysis) }
 
         return if emittable_regions.empty?
 
@@ -1852,12 +1848,36 @@ module Psych
         default_node
       end
 
-      def emit_node_trailing_comments(node, analysis)
+      def emit_node_trailing_comments(node, analysis, next_node: nil)
         trailing_region = node_trailing_comment_region(node, analysis)
         return unless trailing_region && !trailing_region.empty?
+        return if duplicated_by_next_leading_region?(trailing_region, next_node, analysis)
         return if region_already_emitted?(trailing_region, analysis)
 
         @emitter.emit_comment_region(trailing_region, source_lines: analysis.lines)
+      end
+
+      def duplicated_by_next_leading_region?(trailing_region, next_node, analysis)
+        return false unless next_node
+
+        next_leading_region = node_leading_comment_region(next_node, analysis)
+        return false unless next_leading_region && !next_leading_region.empty?
+
+        same_comment_region?(trailing_region, next_leading_region)
+      end
+
+      def same_comment_region?(left, right)
+        comment_region_key(left) == comment_region_key(right)
+      end
+
+      def comment_region_key(region)
+        return unless region
+
+        [
+          (region.start_line if region.respond_to?(:start_line)),
+          (region.end_line if region.respond_to?(:end_line)),
+          region.normalized_content.to_s,
+        ]
       end
 
       def emit_interstitial_blank_lines(start_line, end_line, analysis)

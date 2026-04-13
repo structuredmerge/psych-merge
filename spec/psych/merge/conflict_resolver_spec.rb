@@ -139,6 +139,23 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("template_value1")
         expect(yaml).to include("template_value2")
       end
+
+      it "does not duplicate adjacent full-line comments shared by neighboring matched keys" do
+        yaml = <<~YAML
+          project_emoji: ""
+          # Engines this project supports.
+          engines:
+            - ruby
+        YAML
+
+        analysis = Psych::Merge::FileAnalysis.new(yaml)
+        resolver = described_class.new(analysis, analysis, preference: :template)
+        result = Psych::Merge::MergeResult.new
+
+        resolver.resolve(result)
+
+        expect(result.to_yaml.scan("# Engines this project supports.\n").length).to eq(1)
+      end
     end
 
     context "with per-node-type preference" do
