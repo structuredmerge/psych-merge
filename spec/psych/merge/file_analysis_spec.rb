@@ -279,6 +279,12 @@ RSpec.describe Psych::Merge::FileAnalysis do
 
       expect(analysis.comment_capability).to be_a(Ast::Merge::Comment::Capability)
       expect(analysis.comment_capability.source_augmented?).to be(true)
+      expect(analysis.comment_support_style).to be_a(Ast::Merge::Comment::SupportStyle)
+      expect(analysis.comment_support_style.source_augmented_synthetic?).to be(true)
+      expect(analysis.comment_support_style.synthetic_write?).to be(true)
+      expect(analysis.comment_support_style.details[:capability]).to eq(:source_augmented)
+      expect(analysis.comment_support_style.details[:source]).to eq(:psych_source)
+      expect(analysis.comment_support_style.details[:style]).to eq(:hash_comment)
     end
 
     it "exposes comment nodes" do

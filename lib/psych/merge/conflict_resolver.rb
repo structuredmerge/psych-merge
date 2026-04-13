@@ -506,7 +506,12 @@ module Psych
         if preference_for_pair(template_node, dest_node) == :destination
           emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
         else
-          trim_overpreserved_destination_gap_for(template_node, dest_node)
+          trim_overpreserved_destination_gap_for(
+            template_node,
+            dest_node,
+            comment_source_node: dest_node,
+            comment_analysis: @dest_analysis,
+          )
           emit_node(
             template_node,
             @template_analysis,
@@ -517,14 +522,47 @@ module Psych
         end
       end
 
-      def trim_overpreserved_destination_gap_for(template_node, dest_node)
-        excess_blank_lines = leading_gap_line_count_for(dest_node, @dest_analysis) - leading_gap_line_count_for(template_node, @template_analysis)
+      def trim_overpreserved_destination_gap_for(template_node, dest_node, comment_source_node: nil, comment_analysis: @template_analysis)
+        preferred_gap_line_count = if preserve_destination_leading_gap_for?(comment_source_node, comment_analysis)
+          preferred_leading_gap_line_count_for(
+            template_node,
+            comment_source_node,
+            analysis: @template_analysis,
+            comment_analysis: comment_analysis,
+          )
+        else
+          leading_gap_line_count_for(template_node, @template_analysis)
+        end
+        excess_blank_lines = leading_gap_line_count_for(dest_node, @dest_analysis) - preferred_gap_line_count
         return unless excess_blank_lines.positive?
 
         while excess_blank_lines.positive? && @emitter.lines.last == ""
           @emitter.lines.pop
           excess_blank_lines -= 1
         end
+      end
+
+      def preferred_leading_gap_line_count_for(node, comment_source_node = nil, analysis:, comment_analysis:)
+        leading_region = preferred_leading_comment_region(
+          node,
+          comment_source_node,
+          analysis: analysis,
+          comment_analysis: comment_analysis,
+        )
+
+        if leading_region && !leading_region.empty? && leading_region.respond_to?(:start_line) && leading_region.start_line
+          source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
+          return blank_line_count_before(leading_region.start_line, source_analysis)
+        end
+
+        blank_line_count_before(node_content_start_line(node), analysis)
+      end
+
+      def preserve_destination_leading_gap_for?(comment_source_node, comment_analysis)
+        return false unless comment_source_node && comment_analysis&.respond_to?(:comment_attachment_for)
+
+        attachment = comment_analysis.comment_attachment_for(comment_source_node)
+        attachment&.respond_to?(:orphan_regions) && attachment.orphan_regions.any?
       end
 
       def preference_for_pair(template_node, dest_node)

@@ -73,6 +73,20 @@ module Psych
         @comment_capability ||= comment_tracker.augment(owners: []).capability
       end
 
+      # Describe how Psych merges currently own and emit comments.
+      #
+      # YAML comment handling is source-augmented and emitted through the
+      # synthetic merge layer rather than native AST mutation.
+      #
+      # @return [Ast::Merge::Comment::SupportStyle]
+      def comment_support_style
+        @comment_support_style ||= Ast::Merge::Comment::SupportStyle.source_augmented_synthetic(
+          source: :psych_source,
+          capability: comment_capability.level,
+          style: :hash_comment,
+        )
+      end
+
       # Get all comments converted to shared Ast::Merge comment nodes.
       #
       # @return [Array<Ast::Merge::Comment::Line>]
@@ -187,9 +201,15 @@ module Psych
       # @param options [Hash] Additional attachment metadata
       # @return [Ast::Merge::Comment::Attachment]
       def comment_attachment_for(owner, line_num: nil, **options)
+        base_attachment = if owner.is_a?(MappingEntry) && line_num.nil? && options.empty?
+          mapping_entry_attachment(owner)
+        else
+          @comment_tracker.comment_attachment_for(owner, line_num: line_num, **options)
+        end
+
         merge_comment_attachment_with_layout(
           owner,
-          @comment_tracker.comment_attachment_for(owner, line_num: line_num, **options),
+          base_attachment,
           line_num: line_num,
           **options,
         )
@@ -199,6 +219,61 @@ module Psych
 
       def comment_augmenter_default_owners
         statements.select { |statement| statement.respond_to?(:start_line) && statement.respond_to?(:end_line) }
+      end
+
+      def mapping_entry_attachment(owner)
+        comment_blocks = full_line_comment_blocks_before(owner.key.start_line || 1)
+
+        Ast::Merge::Comment::Attachment.new(
+          owner: owner,
+          leading_region: build_comment_region(:leading, comment_blocks.last || []),
+          inline_region: build_comment_region(:inline, [inline_comment_node_at(owner.key.start_line || 1)].compact),
+          orphan_regions: comment_blocks[0...-1].map { |block| build_comment_region(:orphan, block) }.compact,
+          metadata: {key_name: owner.key_name},
+        )
+      end
+
+      def build_comment_region(kind, comments)
+        return if comments.empty?
+
+        Ast::Merge::Comment::Region.new(kind: kind, nodes: comments)
+      end
+
+      def inline_comment_node_at(line_num)
+        raw_line = @lines[line_num - 1].to_s
+        return if raw_line.strip.start_with?("#")
+
+        @comment_tracker.comment_node_at(line_num)
+      end
+
+      def full_line_comment_blocks_before(line_num)
+        blocks = []
+        current_block = []
+        current_line = line_num - 1
+
+        while current_line.positive?
+          raw_line = @lines[current_line - 1]
+          stripped = raw_line.to_s.strip
+          if stripped.empty?
+            unless current_block.empty?
+              blocks.unshift(current_block.reverse)
+              current_block = []
+            end
+            current_line -= 1
+            next
+          end
+
+          break unless stripped.start_with?("#")
+
+          comment = @comment_tracker.comment_node_at(current_line)
+          break unless comment
+
+          current_block << comment
+          current_line -= 1
+        end
+
+        blocks.unshift(current_block.reverse) unless current_block.empty?
+        blocks
       end
 
       def wrap_root_node(root)
