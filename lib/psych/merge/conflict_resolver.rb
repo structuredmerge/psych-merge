@@ -1205,6 +1205,7 @@ module Psych
           source_node = resolved_comment_node(entry, comment_source_node, leading_region)
           source_content_start_line = node_content_start_line(source_node)
 
+          remember_emitted_leading_comment_region(leading_region)
           @emitter.emit_comment_region(leading_region, source_lines: source_analysis&.lines)
           emit_interstitial_blank_lines(
             (leading_region.end_line || source_content_start_line) + 1,
@@ -1240,6 +1241,7 @@ module Psych
           source_node = resolved_comment_node(node, comment_source_node, leading_region)
           source_content_start_line = node_content_start_line(source_node)
 
+          remember_emitted_leading_comment_region(leading_region)
           @emitter.emit_comment_region(leading_region, source_lines: source_analysis&.lines)
           emit_interstitial_blank_lines(
             (leading_region.end_line || source_content_start_line) + 1,
@@ -1577,8 +1579,11 @@ module Psych
 
         regions = document_trailing_regions_for(augmenter, analysis, fallback_node)
         had_document_trailing_regions = regions.any?
+        last_node_leading_region = node_leading_comment_region(fallback_node, analysis)
         last_node_trailing_region = node_trailing_comment_region(fallback_node, analysis)
-        regions = regions.reject { |region| same_comment_region?(region, last_node_trailing_region) }
+        regions = regions.reject { |region| same_comment_content?(region, last_node_leading_region) }
+        regions = regions.reject { |region| same_comment_content?(region, last_node_trailing_region) }
+        regions = regions.reject { |region| emitted_leading_comment_region?(region) }
 
         if regions.empty?
           emit_trailing_lines_after_last_node(fallback_node, analysis) unless had_document_trailing_regions || last_node_trailing_region
@@ -1622,7 +1627,7 @@ module Psych
             emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
           end
 
-          remember_emitted_document_prelude_region(region)
+          remember_emitted_leading_comment_region(region)
           @emitter.emit_comment_region(region, source_lines: analysis.lines)
           previous_end_line = region.end_line if region.respond_to?(:end_line)
         end
@@ -1638,11 +1643,18 @@ module Psych
         end
       end
 
-      def remember_emitted_document_prelude_region(region)
+      def remember_emitted_leading_comment_region(region)
         normalized = region.normalized_content
         return if normalized.nil? || normalized.empty?
 
         (@emitted_leading_comment_texts ||= ::Set.new).add(normalized)
+      end
+
+      def emitted_leading_comment_region?(region)
+        normalized = region&.normalized_content
+        return false if normalized.nil? || normalized.empty?
+
+        (@emitted_leading_comment_texts ||= ::Set.new).include?(normalized)
       end
 
       def document_comment_augmenter_for(analysis)
@@ -1868,6 +1880,12 @@ module Psych
 
       def same_comment_region?(left, right)
         comment_region_key(left) == comment_region_key(right)
+      end
+
+      def same_comment_content?(left, right)
+        return false unless left && right
+
+        left.normalized_content.to_s == right.normalized_content.to_s
       end
 
       def comment_region_key(region)
