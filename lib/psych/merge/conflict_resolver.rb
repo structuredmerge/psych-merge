@@ -1543,6 +1543,7 @@ module Psych
             emit_interstitial_blank_lines(previous_end_line + 1, region.start_line - 1, analysis)
           end
 
+          remember_emitted_document_prelude_region(region)
           @emitter.emit_comment_region(region, source_lines: analysis.lines)
           previous_end_line = region.end_line if region.respond_to?(:end_line)
         end
@@ -1556,6 +1557,13 @@ module Psych
         elsif last_region_end
           emit_interstitial_blank_lines(last_region_end + 1, analysis.lines.length, analysis)
         end
+      end
+
+      def remember_emitted_document_prelude_region(region)
+        normalized = region.normalized_content
+        return if normalized.nil? || normalized.empty?
+
+        (@emitted_leading_comment_texts ||= ::Set.new).add(normalized)
       end
 
       def document_comment_augmenter_for(analysis)
