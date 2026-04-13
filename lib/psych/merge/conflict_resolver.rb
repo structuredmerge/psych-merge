@@ -506,6 +506,7 @@ module Psych
         if preference_for_pair(template_node, dest_node) == :destination
           emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
         else
+          trim_overpreserved_destination_gap_for(template_node, dest_node)
           emit_node(
             template_node,
             @template_analysis,
@@ -513,6 +514,16 @@ module Psych
             comment_source_node: dest_node,
             comment_analysis: @dest_analysis,
           )
+        end
+      end
+
+      def trim_overpreserved_destination_gap_for(template_node, dest_node)
+        excess_blank_lines = leading_gap_line_count_for(dest_node, @dest_analysis) - leading_gap_line_count_for(template_node, @template_analysis)
+        return unless excess_blank_lines.positive?
+
+        while excess_blank_lines.positive? && @emitter.lines.last == ""
+          @emitter.lines.pop
+          excess_blank_lines -= 1
         end
       end
 
@@ -1645,6 +1656,34 @@ module Psych
         leading_region = node_leading_comment_region(node, analysis)
         return leading_region&.start_line if leading_region&.start_line
         node.start_line if node.respond_to?(:start_line) && node.start_line
+      end
+
+      def leading_gap_line_count_for(node, analysis)
+        return 0 unless node && analysis
+
+        anchor_line = if (leading_region = node_leading_comment_region(node, analysis)) && leading_region.respond_to?(:start_line) && leading_region.start_line
+          leading_region.start_line
+        elsif node.respond_to?(:start_line) && node.start_line
+          node.start_line
+        end
+        return 0 unless anchor_line
+
+        blank_line_count_before(anchor_line, analysis)
+      end
+
+      def blank_line_count_before(line_num, analysis)
+        count = 0
+        current = line_num - 1
+
+        while current >= 1
+          line = analysis.line_at(current)
+          break unless line && line.strip.empty?
+
+          count += 1
+          current -= 1
+        end
+
+        count
       end
 
       def mapping_entry_content_start_line(entry)

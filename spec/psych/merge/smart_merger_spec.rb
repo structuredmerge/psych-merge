@@ -574,6 +574,29 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).not_to include("template inline")
       end
 
+      it "collapses a destination-only leading gap when template preference attaches the matched docs" do
+        template = <<~YAML
+          keep: 1
+          # floating note
+          commented: 1
+        YAML
+        dest = <<~YAML
+          keep: 1
+
+          # floating note
+          commented: old
+        YAML
+
+        merger = described_class.new(
+          template,
+          dest,
+          preference: :template,
+        )
+        result = merger.merge
+
+        expect(result).to eq(template)
+      end
+
       it "preserves blank-line-separated destination comment blocks for nested matched mapping entries when template wins" do
         template = <<~YAML
           parent:
