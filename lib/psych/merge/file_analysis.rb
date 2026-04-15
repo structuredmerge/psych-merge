@@ -220,6 +220,18 @@ module Psych
         :tracker_layout_merge
       end
 
+      def ruleset_owner_selector
+        :mapping_entries
+      end
+
+      def ruleset_match_key
+        :key_name
+      end
+
+      def ruleset_render_family
+        :key_value_colon
+      end
+
       private
 
       def mapping_entry_attachment(owner)

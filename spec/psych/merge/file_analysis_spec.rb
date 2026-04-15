@@ -46,6 +46,23 @@ RSpec.describe Psych::Merge::FileAnalysis do
     end
   end
 
+  describe "#feature_profile" do
+    it "advertises the YAML mapping-entry ruleset shape" do
+      analysis = described_class.new(<<~YAML)
+        key: value
+        other: stuff
+      YAML
+      profile = analysis.feature_profile
+
+      expect(profile.owner_selector).to eq(:mapping_entries)
+      expect(profile.match_key).to eq(:key_name)
+      expect(profile.read_strategy).to eq(:source_augmented_portable_write)
+      expect(profile.attachment_strategy).to eq(:tracker_layout_merge)
+      expect(profile.comment_style).to eq(:hash_comment)
+      expect(profile.render_family).to eq(:key_value_colon)
+    end
+  end
+
   describe "#nodes" do
     it "extracts mapping entries as nodes" do
       yaml = <<~YAML
