@@ -842,10 +842,110 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-        expect(result).to match(/# More docs\n\nkey: template_value\n\z/)
-      end
+      expect(result).to match(/# More docs\n\nkey: template_value\n\z/)
+    end
 
-      it "preserves section-leading comments for recursively merged mappings" do
+    it "collapses duplicated template-owned preamble prefixes in heal mode" do
+      template = <<~YAML
+        # Shared header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Shared header
+        # Shared header
+        # Destination header
+        key: dest_value
+      YAML
+
+      result = described_class.new(
+        template,
+        dest,
+        add_template_only_nodes: true,
+      ).merge
+
+      expect(result.lines.grep("# Shared header\n").size).to eq(0)
+      expect(result.lines.grep("# Destination header\n").size).to eq(1)
+      expect(result).to include("key: dest_value")
+    end
+
+    it "preserves duplicated template-owned preamble prefixes in skip mode" do
+      template = <<~YAML
+        # Shared header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Shared header
+        # Shared header
+        # Destination header
+        key: dest_value
+      YAML
+
+      result = described_class.new(
+        template,
+        dest,
+        add_template_only_nodes: true,
+        corruption_handling: :skip,
+      ).merge
+
+      expect(result.lines.grep("# Shared header\n").size).to eq(2)
+      expect(result.lines.grep("# Destination header\n").size).to eq(1)
+    end
+
+    it "warns when preserving duplicated template-owned preamble prefixes in warn mode" do
+      template = <<~YAML
+        # Shared header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Shared header
+        # Shared header
+        # Destination header
+        key: dest_value
+      YAML
+
+      allow(Psych::Merge::DebugLogger).to receive(:debug_warning)
+
+      result = described_class.new(
+        template,
+        dest,
+        add_template_only_nodes: true,
+        corruption_handling: :warn,
+      ).merge
+
+      expect(Psych::Merge::DebugLogger).to have_received(:debug_warning).with(
+        /Suspected corruption \(duplicate_template_preamble_prefix\)/,
+        hash_including(repeated_nodes: 2, remaining_nodes: 1),
+      )
+      expect(result.lines.grep("# Shared header\n").size).to eq(2)
+    end
+
+    it "raises on duplicated template-owned preamble prefixes in error mode" do
+      template = <<~YAML
+        # Shared header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Shared header
+        # Shared header
+        # Destination header
+        key: dest_value
+      YAML
+
+      expect {
+        described_class.new(
+          template,
+          dest,
+          add_template_only_nodes: true,
+          corruption_handling: :error,
+        ).merge
+      }.to raise_error(Psych::Merge::CorruptionDetectedError, /duplicate_template_preamble_prefix/)
+    end
+
+    it "preserves section-leading comments for recursively merged mappings" do
         template = <<~YAML
           # Header comment
           defaults:

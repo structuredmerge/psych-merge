@@ -20,7 +20,6 @@ RSpec.describe Psych::Merge::SmartMerger, "comment behavior matrix", :yaml_parsi
         matched_inline_comment_preference: "destination inline comments remain authoritative on matched YAML entries",
         cross_source_preamble_ownership_dedup: "Psych document preamble vs first-owner ownership remains unsupported",
         cross_source_preamble_spacing_dedup: "Psych equivalent preamble blocks with different blank-line ownership remain unsupported",
-        duplicate_template_preamble_prefix_collapse: "Psych duplicate template-prefix collapse remains a healing policy, not a normative merge rule",
       },
     )
   end
