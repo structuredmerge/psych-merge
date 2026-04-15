@@ -60,6 +60,9 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect(profile.attachment_strategy).to eq(:tracker_layout_merge)
       expect(profile.comment_style).to eq(:hash_comment)
       expect(profile.render_family).to eq(:key_value_colon)
+      expect(profile.repair_policies).to eq([])
+      expect(profile.surfaces).to eq([])
+      expect(profile.delegation_policies).to eq([])
     end
   end
 
