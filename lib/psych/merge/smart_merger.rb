@@ -46,6 +46,7 @@ module Psych
       include ::Ast::Merge::Runtime::RootSessionSupport
 
       attr_reader :runtime_session
+      attr_reader :corruption_handling
 
       # Creates a new SmartMerger for intelligent YAML file merging.
       #
@@ -82,6 +83,7 @@ module Psych
         add_template_only_nodes: false,
         add_template_only_sequence_items: nil,
         remove_template_missing_nodes: false,
+        corruption_handling: :heal,
         recursive: true,
         freeze_token: FileAnalysis::DEFAULT_FREEZE_TOKEN,
         match_refiner: nil,
@@ -91,6 +93,7 @@ module Psych
         **options
       )
         @remove_template_missing_nodes = remove_template_missing_nodes
+        @corruption_handling = ::Ast::Merge::Healer.normalize_mode(corruption_handling)
         @recursive = recursive
         @add_template_only_sequence_items = add_template_only_sequence_items
         super(
@@ -160,6 +163,7 @@ module Psych
             preference: @preference,
             add_template_only_nodes: @add_template_only_nodes,
             remove_template_missing_nodes: @remove_template_missing_nodes,
+            corruption_handling: @corruption_handling,
             recursive: @recursive,
             freeze_token: @freeze_token,
             runtime_operation_count: runtime_session&.operations&.size || 0,
@@ -235,6 +239,7 @@ module Psych
           add_template_only_nodes: @add_template_only_nodes,
           add_template_only_sequence_items: @add_template_only_sequence_items,
           remove_template_missing_nodes: @remove_template_missing_nodes,
+          corruption_handling: @corruption_handling,
           recursive: @recursive,
           match_refiner: @match_refiner,
           node_typing: @node_typing,

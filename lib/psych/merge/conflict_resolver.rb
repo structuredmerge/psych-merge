@@ -23,6 +23,7 @@ module Psych
     # @see Ast::Merge::ConflictResolverBase
     class ConflictResolver < Ast::Merge::ConflictResolverBase
       include ::Ast::Merge::TrailingGroups::DestIterate
+      attr_reader :corruption_handling
 
       # Creates a new ConflictResolver
       #
@@ -42,7 +43,7 @@ module Psych
       # @param options [Hash] Additional options for forward compatibility
       # @param node_typing [Hash{Symbol,String => #call}, nil] Node typing configuration
       #   for per-node-type preferences
-      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, add_template_only_sequence_items: nil, remove_template_missing_nodes: false, recursive: true, match_refiner: nil, node_typing: nil, **options)
+      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, add_template_only_sequence_items: nil, remove_template_missing_nodes: false, corruption_handling: :heal, recursive: true, match_refiner: nil, node_typing: nil, **options)
         super(
           strategy: :batch,
           preference: preference,
@@ -54,6 +55,7 @@ module Psych
           match_refiner: match_refiner,
           **options
         )
+        @corruption_handling = ::Ast::Merge::Healer.normalize_mode(corruption_handling)
         @add_template_only_sequence_items = add_template_only_sequence_items.nil? ? add_template_only_nodes : add_template_only_sequence_items
         @node_typing = node_typing
         @emitter = Emitter.new
@@ -275,7 +277,15 @@ module Psych
               removed_boundary = emit_removed_destination_node_comments(dest_node, @dest_analysis, next_node: next_dest_node)
               emitted_dest_node = false
             elsif redundant_destination_duplicate?(dest_node, candidates)
-              emitted_dest_node = false
+              if handle_suspected_corruption(
+                kind: :duplicate_destination_mapping_entry,
+                message: "destination mapping entry duplicates semantic content already present in the preferred template mapping",
+                context: duplicate_destination_context(dest_node, @dest_analysis),
+              )
+                emitted_dest_node = false
+              else
+                emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
+              end
             else
               emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
             end
@@ -918,7 +928,15 @@ module Psych
             emitted_recursively = should_recurse?(depth) && (item.mapping? || item.sequence?)
             emit_removed_sequence_item_comments(item, @dest_analysis, depth: depth)
           elsif redundant_destination_sequence_duplicate?(item, template_items_by_key)
-            skipped_redundant_duplicate = true
+            if handle_suspected_corruption(
+              kind: :duplicate_destination_sequence_item,
+              message: "destination sequence item duplicates semantic content already present in the preferred template sequence",
+              context: duplicate_destination_context(item, @dest_analysis),
+            )
+              skipped_redundant_duplicate = true
+            else
+              emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
+            end
           else
             emit_sequence_item(item, @dest_analysis, next_node: next_dest_node)
           end
@@ -1779,6 +1797,26 @@ module Psych
         template_candidates.any? do |candidate|
           node_semantic_identity(candidate[:node], @template_analysis) == dest_identity
         end
+      end
+
+      def duplicate_destination_context(node, analysis)
+        {
+          file: analysis.respond_to?(:path) ? analysis.path : nil,
+          owner_type: node&.respond_to?(:type) ? node.type : node.class.name.split("::").last,
+          semantic_identity: node_semantic_identity(node, analysis),
+          line_range: [node&.start_line, node&.end_line].compact,
+        }.compact
+      end
+
+      def handle_suspected_corruption(kind:, message:, context:)
+        ::Ast::Merge::Healer.handle(
+          mode: corruption_handling,
+          kind: kind,
+          message: message,
+          prefix: "[psych-merge]",
+          error_class: Psych::Merge::CorruptionDetectedError,
+          warner: ->(formatted) { DebugLogger.debug_warning(formatted, context) },
+        )
       end
 
       def node_semantic_identity(node, analysis)

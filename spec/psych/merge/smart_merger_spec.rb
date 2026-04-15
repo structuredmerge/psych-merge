@@ -175,6 +175,78 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result.scan("Exclude: ['*.md']").size).to eq(1)
       end
 
+      it "preserves a redundant duplicate destination mapping entry in skip mode" do
+        template = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+        YAML
+        dest = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+            Exclude: ['*.md']
+        YAML
+
+        result = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+          corruption_handling: :skip,
+        ).merge
+
+        expect(result.scan("Exclude: ['*.md']").size).to eq(2)
+      end
+
+      it "warns when preserving a redundant duplicate destination mapping entry in warn mode" do
+        template = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+        YAML
+        dest = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+            Exclude: ['*.md']
+        YAML
+
+        allow(Psych::Merge::DebugLogger).to receive(:debug_warning)
+
+        result = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+          corruption_handling: :warn,
+        ).merge
+
+        expect(Psych::Merge::DebugLogger).to have_received(:debug_warning).with(
+          /Suspected corruption \(duplicate_destination_mapping_entry\)/,
+          hash_including(owner_type: "MappingEntry"),
+        )
+        expect(result.scan("Exclude: ['*.md']").size).to eq(2)
+      end
+
+      it "raises on a redundant duplicate destination mapping entry in error mode" do
+        template = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+        YAML
+        dest = <<~YAML
+          Layout/IndentationConsistency:
+            Exclude: ['*.md']
+            Exclude: ['*.md']
+        YAML
+
+        expect {
+          described_class.new(
+            template,
+            dest,
+            preference: :template,
+            add_template_only_nodes: true,
+            corruption_handling: :error,
+          ).merge
+        }.to raise_error(Psych::Merge::CorruptionDetectedError, /duplicate_destination_mapping_entry/)
+      end
+
       it "does not preserve redundant duplicate destination sequence items when template preference is used" do
         template = <<~YAML
           workflow:
@@ -200,6 +272,90 @@ RSpec.describe Psych::Merge::SmartMerger do
 
         expect(result).to eq(template)
         expect(result.scan("- if: '$CI_MERGE_REQUEST_IID'").size).to eq(1)
+      end
+
+      it "preserves redundant duplicate destination sequence items in skip mode" do
+        template = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+        dest = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+
+        result = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+          corruption_handling: :skip,
+        ).merge
+
+        expect(result.scan("- if: '$CI_MERGE_REQUEST_IID'").size).to eq(2)
+      end
+
+      it "warns when preserving redundant duplicate destination sequence items in warn mode" do
+        template = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+        dest = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+
+        allow(Psych::Merge::DebugLogger).to receive(:debug_warning)
+
+        result = described_class.new(
+          template,
+          dest,
+          preference: :template,
+          add_template_only_nodes: true,
+          corruption_handling: :warn,
+        ).merge
+
+        expect(Psych::Merge::DebugLogger).to have_received(:debug_warning).with(
+          /Suspected corruption \(duplicate_destination_sequence_item\)/,
+          hash_including(owner_type: "NodeWrapper"),
+        )
+        expect(result.scan("- if: '$CI_MERGE_REQUEST_IID'").size).to eq(2)
+      end
+
+      it "raises on redundant duplicate destination sequence items in error mode" do
+        template = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+        dest = <<~YAML
+          workflow:
+            rules:
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_MERGE_REQUEST_IID'
+              - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+        YAML
+
+        expect {
+          described_class.new(
+            template,
+            dest,
+            preference: :template,
+            add_template_only_nodes: true,
+            corruption_handling: :error,
+          ).merge
+        }.to raise_error(Psych::Merge::CorruptionDetectedError, /duplicate_destination_sequence_item/)
       end
 
       it "does not preserve redundant duplicate destination entries when destination preference is used" do
@@ -931,6 +1087,7 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(debug_result).to have_key(:dest_analysis)
       expect(debug_result).to have_key(:debug)
       expect(debug_result).to have_key(:runtime)
+      expect(debug_result.dig(:debug, :corruption_handling)).to eq(:heal)
     end
 
     it "includes statistics about the merge" do

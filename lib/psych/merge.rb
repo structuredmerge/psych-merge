@@ -87,6 +87,8 @@ module Psych
     #   end
     class DestinationParseError < ParseError; end
 
+    class CorruptionDetectedError < Error; end
+
     autoload :CommentTracker, "psych/merge/comment_tracker"
     autoload :DebugLogger, "psych/merge/debug_logger"
     autoload :DiffMapper, "psych/merge/diff_mapper"
