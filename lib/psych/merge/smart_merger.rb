@@ -43,6 +43,8 @@ module Psych
     #   merger = SmartMerger.new(template, dest,
     #     regions: [{ detector: SomeDetector.new, merger_class: SomeMerger }])
     class SmartMerger < ::Ast::Merge::SmartMergerBase
+      include ::Ast::Merge::Runtime::RootSessionSupport
+
       attr_reader :runtime_session
 
       # Creates a new SmartMerger for intelligent YAML file merging.
@@ -257,14 +259,13 @@ module Psych
       private
 
       def start_runtime_session!
-        root_surface = Ast::Merge::Runtime::Surface.new(
+        start_runtime_root_session!(
           surface_kind: :yaml_document,
           declared_language: :yaml,
           effective_language: :yaml,
-          address: "document[0]",
-          metadata: {recursive: @recursive},
-        )
-        session = Ast::Merge::Runtime::Session.new(
+          operation_id: "yaml-document-root",
+          delegate_name: "psych-yaml",
+          surface_metadata: {recursive: @recursive},
           policy_context: {
             preference: @preference,
             add_template_only_nodes: @add_template_only_nodes,
@@ -272,74 +273,33 @@ module Psych
             recursive: @recursive,
           },
           metadata: {merger: self.class.name},
-          delegation_registry: Ast::Merge::Runtime::DelegationRegistry.new(delegates: [runtime_root_delegate]),
-        )
-        root_operation = Ast::Merge::Runtime::Operation.new(
-          operation_id: "yaml-document-root",
-          surface: root_surface,
-          template_fragment: @template_content,
-          destination_fragment: @dest_content,
-          requested_strategy: :merge,
           options: {
             preference: @preference,
             add_template_only_nodes: @add_template_only_nodes,
             remove_template_missing_nodes: @remove_template_missing_nodes,
             recursive: @recursive,
           },
-          status: :running,
+          language_chain: [:yaml],
+          delegate_metadata: {merger: self.class.name},
         )
-
-        session.register(
-          root_operation,
-          frame: Ast::Merge::Runtime::Frame.new(
-            operation_id: root_operation.operation_id,
-            depth: 0,
-            surface_path: root_surface.address,
-            language_chain: [:yaml],
-          ),
-          delegate: session.resolve_delegate_for(root_surface, capability: :merge),
-        )
-        @runtime_session = session
-        root_operation
       end
 
       def complete_runtime_session!(root_operation, merge_result)
-        return unless @runtime_session && root_operation
-
-        root_operation.complete!(
-          result: Ast::Merge::Runtime::ChildResult.new(
-            replacement_text: merge_result.to_yaml,
-            capabilities_used: [],
-            metadata: {
-              stats: merge_result.statistics,
-              decisions: merge_result.decision_summary,
-            },
-          ),
+        complete_runtime_root_session!(
+          root_operation: root_operation,
+          replacement_text: merge_result.to_yaml,
+          metadata: {
+            stats: merge_result.statistics,
+            decisions: merge_result.decision_summary,
+          },
         )
       end
 
       def fail_runtime_session!(root_operation, error)
-        return unless @runtime_session && root_operation
-
-        diagnostic = Ast::Merge::Runtime::Diagnostic.new(
-          severity: :error,
+        fail_runtime_root_session!(
+          root_operation: root_operation,
+          error: error,
           kind: :merge_failed,
-          operation_id: root_operation.operation_id,
-          surface_path: root_operation.surface.address,
-          message: error.message,
-          metadata: {error_class: error.class.name},
-        )
-        root_operation.fail!(diagnostic: diagnostic)
-      end
-
-      def runtime_root_delegate
-        Ast::Merge::Runtime::Delegate.new(
-          name: "psych-yaml",
-          priority: 10,
-          surface_kinds: [:yaml_document],
-          languages: [:yaml],
-          capabilities: {merge: true},
-          metadata: {merger: self.class.name},
         )
       end
     end
