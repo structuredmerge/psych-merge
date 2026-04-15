@@ -429,7 +429,7 @@ module Psych
       def preferred_document_prelude_context(template_nodes, dest_nodes, document_analysis, document_nodes)
         return [document_analysis, document_nodes] unless @add_template_only_nodes
         return [document_analysis, document_nodes] unless document_leading_regions_for(document_comment_augmenter_for(document_analysis), document_nodes, document_analysis).empty?
-        return [document_analysis, document_nodes] if duplicated_template_preamble_prefix_in_first_node_leading_region?(document_analysis, document_nodes)
+        return [document_analysis, document_nodes] if first_node_leading_comment_region(document_nodes, document_analysis)
 
         supplemental_analysis, supplemental_nodes = nonpreferred_document_context(template_nodes, dest_nodes)
         supplemental_regions = document_leading_regions_for(
@@ -590,6 +590,7 @@ module Psych
           source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
           source_node = resolved_comment_node(node, comment_source_node, leading_region)
           leading_region = canonical_leading_comment_region(leading_region, source_analysis: source_analysis, source_node: source_node)
+          return fallback_blank_line_count_for(node, analysis) unless leading_region && !leading_region.empty?
           return blank_line_count_before(leading_region.start_line, source_analysis)
         end
 
@@ -1222,6 +1223,7 @@ module Psych
           source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
           source_node = resolved_comment_node(entry, comment_source_node, leading_region)
           leading_region = canonical_leading_comment_region(leading_region, source_analysis: source_analysis, source_node: source_node)
+          return if leading_region.nil? || leading_region.empty?
           source_content_start_line = node_content_start_line(source_node)
 
           remember_emitted_leading_comment_region(leading_region)
@@ -1259,6 +1261,7 @@ module Psych
           source_analysis = resolved_comment_analysis(analysis, comment_source_node, comment_analysis, leading_region)
           source_node = resolved_comment_node(node, comment_source_node, leading_region)
           leading_region = canonical_leading_comment_region(leading_region, source_analysis: source_analysis, source_node: source_node)
+          return if leading_region.nil? || leading_region.empty?
           source_content_start_line = node_content_start_line(source_node)
 
           remember_emitted_leading_comment_region(leading_region)
@@ -1732,9 +1735,9 @@ module Psych
           left.respond_to?(:normalized_content) && right.respond_to?(:normalized_content) &&
             left.normalized_content == right.normalized_content
         end
-        return region if repeat_count < 2
-
         remainder_nodes = region_nodes.drop(repeat_count * template_nodes.length)
+        return empty_comment_region_like(region) if @preference == :template && repeat_count == 1 && remainder_nodes.empty?
+        return region if repeat_count < 2
         return region if remainder_nodes.empty?
 
         should_heal = handle_suspected_corruption(
@@ -1757,10 +1760,7 @@ module Psych
       def duplicated_template_preamble_prefix_in_first_node_leading_region?(analysis, nodes)
         return false unless analysis.equal?(@dest_analysis)
 
-        first_node = Array(nodes).first
-        return false unless first_node
-
-        region = node_leading_comment_region(first_node, analysis)
+        region = first_node_leading_comment_region(nodes, analysis)
         return false unless region && !region.empty?
 
         template_region = document_comment_augmenter_for(@template_analysis)&.preamble_region
@@ -1776,6 +1776,16 @@ module Psych
         end
 
         repeat_count >= 2 && region_nodes.drop(repeat_count * template_nodes.length).any?
+      end
+
+      def first_node_leading_comment_region(nodes, analysis)
+        first_node = Array(nodes).first
+        return nil unless first_node
+
+        region = node_leading_comment_region(first_node, analysis)
+        return nil unless region && !region.empty?
+
+        region
       end
 
       def leading_repeat_count(lines, prefix, &comparator)
@@ -1794,6 +1804,14 @@ module Psych
         return false unless candidate && candidate.length == prefix.length
 
         candidate.zip(prefix).all? { |left, right| comparator.call(left, right) }
+      end
+
+      def empty_comment_region_like(region)
+        ::Ast::Merge::Comment::Region.new(
+          kind: region.kind,
+          nodes: [],
+          metadata: region.metadata,
+        )
       end
 
       def document_trailing_regions_for(augmenter, analysis, fallback_node)

@@ -842,8 +842,8 @@ RSpec.describe Psych::Merge::SmartMerger do
         )
         result = merger.merge
 
-      expect(result).to match(/# More docs\n\nkey: template_value\n\z/)
-    end
+        expect(result).to match(/# More docs\n\nkey: template_value\n\z/)
+      end
 
     it "collapses duplicated template-owned preamble prefixes in heal mode" do
       template = <<~YAML
@@ -945,24 +945,69 @@ RSpec.describe Psych::Merge::SmartMerger do
       }.to raise_error(Psych::Merge::CorruptionDetectedError, /duplicate_template_preamble_prefix/)
     end
 
+    it "keeps destination-owned first-owner docs singular when template models them as a preamble" do
+      template = <<~YAML
+        # Template header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Destination header
+        key: dest_value
+      YAML
+
+      result = described_class.new(
+        template,
+        dest,
+        add_template_only_nodes: true,
+      ).merge
+
+      expect(result.lines.grep("# Template header\n").size).to eq(0)
+      expect(result.lines.grep("# Destination header\n").size).to eq(1)
+      expect(result).to include("key: dest_value")
+    end
+
+    it "deduplicates equivalent preamble docs when only blank-line ownership differs" do
+      template = <<~YAML
+        # Shared header
+
+        key: template_value
+      YAML
+      dest = <<~YAML
+        # Shared header
+        key: dest_value
+      YAML
+
+      result = described_class.new(
+        template,
+        dest,
+        preference: :template,
+        add_template_only_nodes: true,
+      ).merge
+
+      expect(result.lines.grep("# Shared header\n").size).to eq(1)
+      expect(result).to include("key: template_value")
+      expect(result).not_to include("key: dest_value")
+    end
+
     it "preserves section-leading comments for recursively merged mappings" do
-        template = <<~YAML
-          # Header comment
-          defaults:
-            freeze_token: template-token
+      template = <<~YAML
+        # Header comment
+        defaults:
+          freeze_token: template-token
 
-          # Token section comment
-          tokens:
-            author:
-              name: "{KJ|AUTHOR:NAME}"
+        # Token section comment
+        tokens:
+          author:
+            name: "{KJ|AUTHOR:NAME}"
 
-          # Patterns section comment
-          patterns:
-            - path: "certs/**"
-              strategy: raw_copy
+        # Patterns section comment
+        patterns:
+          - path: "certs/**"
+            strategy: raw_copy
 
-          # Files section comment
-          files: {}
+        # Files section comment
+        files: {}
         YAML
         dest = <<~YAML
           # Header comment
