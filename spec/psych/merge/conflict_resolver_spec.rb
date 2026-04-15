@@ -412,7 +412,7 @@ RSpec.describe Psych::Merge::ConflictResolver do
         expect(yaml).to include("template_value")
       end
 
-      it "preserves destination leading and inline comments when template content wins" do
+      it "preserves destination leading comments while template inline payload wins" do
         template = <<~YAML
           # Template comment
           key: template_value # template inline
@@ -436,9 +436,9 @@ RSpec.describe Psych::Merge::ConflictResolver do
         yaml = result.to_yaml
 
         expect(yaml).to include("# Destination comment")
-        expect(yaml).to include("key: template_value # destination inline")
+        expect(yaml).to include("key: template_value # template inline")
         expect(yaml).not_to include("# Template comment")
-        expect(yaml).not_to include("template inline")
+        expect(yaml).not_to include("destination inline")
       end
 
       it "preserves blank-line-separated destination comment blocks for nested matched mapping entries" do

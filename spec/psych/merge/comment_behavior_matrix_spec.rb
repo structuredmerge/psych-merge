@@ -16,9 +16,7 @@ RSpec.describe Psych::Merge::SmartMerger, "comment behavior matrix", :yaml_parsi
         line = "#{name}: #{value}"
         inline ? "#{line} # #{inline}" : line
       end,
-      capabilities: {
-        matched_inline_comment_preference: "destination inline comments remain authoritative on matched YAML entries",
-      },
+      capabilities: {},
     )
   end
 end

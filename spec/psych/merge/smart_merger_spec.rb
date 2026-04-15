@@ -709,7 +709,7 @@ RSpec.describe Psych::Merge::SmartMerger do
         expect(result).to include("Important comment")
       end
 
-      it "preserves destination comments when template preference wins for a matched node" do
+      it "preserves destination leading comments while inline payload follows template preference for a matched node" do
         template = <<~YAML
           # Template comment
           key: template_value # template inline
@@ -727,9 +727,9 @@ RSpec.describe Psych::Merge::SmartMerger do
         result = merger.merge
 
         expect(result).to include("# Destination comment")
-        expect(result).to include("key: template_value # destination inline")
+        expect(result).to include("key: template_value # template inline")
         expect(result).not_to include("# Template comment")
-        expect(result).not_to include("template inline")
+        expect(result).not_to include("destination inline")
       end
 
       it "collapses a destination-only leading gap when template preference attaches the matched docs" do

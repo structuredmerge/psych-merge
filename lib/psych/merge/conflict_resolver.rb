@@ -1985,10 +1985,13 @@ module Psych
       end
 
       def preferred_inline_comment_region(node, comment_source_node = nil, analysis: nil, comment_analysis: analysis)
+        node_region = node_inline_comment_region(node, analysis)
+        return node_region if node_region && !node_region.empty?
+
         source_region = node_inline_comment_region(comment_source_node, comment_analysis) if comment_source_node
         return source_region if source_region && !source_region.empty?
 
-        node_inline_comment_region(node, analysis)
+        node_region
       end
 
       def resolved_comment_analysis(default_analysis, comment_source_node, comment_analysis, region)
