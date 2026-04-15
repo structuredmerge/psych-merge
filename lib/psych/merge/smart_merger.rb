@@ -43,6 +43,8 @@ module Psych
     #   merger = SmartMerger.new(template, dest,
     #     regions: [{ detector: SomeDetector.new, merger_class: SomeMerger }])
     class SmartMerger < ::Ast::Merge::SmartMergerBase
+      attr_reader :runtime_session
+
       # Creates a new SmartMerger for intelligent YAML file merging.
       #
       # @param template_content [String] Template YAML source code
@@ -117,26 +119,55 @@ module Psych
         merge_result.to_yaml
       end
 
+      # Perform the merge operation and return the full MergeResult object.
+      #
+      # @return [MergeResult] The merge result containing merged YAML content and metadata
+      def merge_result
+        return @merge_result if @merge_result
+
+        root_operation = start_runtime_session!
+        @merge_result = super
+        complete_runtime_session!(root_operation, @merge_result)
+        @merge_result
+      rescue StandardError => e
+        fail_runtime_session!(root_operation, e)
+        raise
+      end
+
       # Perform the merge and return detailed results including debug info.
       #
       # @return [Hash] Hash containing :content, :statistics, :decisions
       def merge_with_debug
-        content = merge
+        result_obj = merge_result
+        template_analysis_debug = {
+          valid: @template_analysis.valid?,
+          statements: @template_analysis.statements.size,
+          freeze_blocks: @template_analysis.freeze_blocks.size,
+        }
+        dest_analysis_debug = {
+          valid: @dest_analysis.valid?,
+          statements: @dest_analysis.statements.size,
+          freeze_blocks: @dest_analysis.freeze_blocks.size,
+        }
 
         {
-          content: content,
-          statistics: @result.statistics,
-          decisions: @result.decision_summary,
-          template_analysis: {
-            valid: @template_analysis.valid?,
-            statements: @template_analysis.statements.size,
-            freeze_blocks: @template_analysis.freeze_blocks.size,
+          content: result_obj.to_yaml,
+          debug: {
+            template_statements: template_analysis_debug[:statements],
+            dest_statements: dest_analysis_debug[:statements],
+            preference: @preference,
+            add_template_only_nodes: @add_template_only_nodes,
+            remove_template_missing_nodes: @remove_template_missing_nodes,
+            recursive: @recursive,
+            freeze_token: @freeze_token,
+            runtime_operation_count: runtime_session&.operations&.size || 0,
+            runtime_diagnostic_count: runtime_session&.diagnostics&.size || 0,
           },
-          dest_analysis: {
-            valid: @dest_analysis.valid?,
-            statements: @dest_analysis.statements.size,
-            freeze_blocks: @dest_analysis.freeze_blocks.size,
-          },
+          runtime: runtime_session&.to_h,
+          statistics: result_obj.statistics,
+          decisions: result_obj.decision_summary,
+          template_analysis: template_analysis_debug,
+          dest_analysis: dest_analysis_debug,
         }
       end
 
@@ -221,6 +252,95 @@ module Psych
       # @return [Class] The destination parse error class for YAML
       def destination_parse_error_class
         DestinationParseError
+      end
+
+      private
+
+      def start_runtime_session!
+        root_surface = Ast::Merge::Runtime::Surface.new(
+          surface_kind: :yaml_document,
+          declared_language: :yaml,
+          effective_language: :yaml,
+          address: "document[0]",
+          metadata: {recursive: @recursive},
+        )
+        session = Ast::Merge::Runtime::Session.new(
+          policy_context: {
+            preference: @preference,
+            add_template_only_nodes: @add_template_only_nodes,
+            remove_template_missing_nodes: @remove_template_missing_nodes,
+            recursive: @recursive,
+          },
+          metadata: {merger: self.class.name},
+          delegation_registry: Ast::Merge::Runtime::DelegationRegistry.new(delegates: [runtime_root_delegate]),
+        )
+        root_operation = Ast::Merge::Runtime::Operation.new(
+          operation_id: "yaml-document-root",
+          surface: root_surface,
+          template_fragment: @template_content,
+          destination_fragment: @dest_content,
+          requested_strategy: :merge,
+          options: {
+            preference: @preference,
+            add_template_only_nodes: @add_template_only_nodes,
+            remove_template_missing_nodes: @remove_template_missing_nodes,
+            recursive: @recursive,
+          },
+          status: :running,
+        )
+
+        session.register(
+          root_operation,
+          frame: Ast::Merge::Runtime::Frame.new(
+            operation_id: root_operation.operation_id,
+            depth: 0,
+            surface_path: root_surface.address,
+            language_chain: [:yaml],
+          ),
+          delegate: session.resolve_delegate_for(root_surface, capability: :merge),
+        )
+        @runtime_session = session
+        root_operation
+      end
+
+      def complete_runtime_session!(root_operation, merge_result)
+        return unless @runtime_session && root_operation
+
+        root_operation.complete!(
+          result: Ast::Merge::Runtime::ChildResult.new(
+            replacement_text: merge_result.to_yaml,
+            capabilities_used: [],
+            metadata: {
+              stats: merge_result.statistics,
+              decisions: merge_result.decision_summary,
+            },
+          ),
+        )
+      end
+
+      def fail_runtime_session!(root_operation, error)
+        return unless @runtime_session && root_operation
+
+        diagnostic = Ast::Merge::Runtime::Diagnostic.new(
+          severity: :error,
+          kind: :merge_failed,
+          operation_id: root_operation.operation_id,
+          surface_path: root_operation.surface.address,
+          message: error.message,
+          metadata: {error_class: error.class.name},
+        )
+        root_operation.fail!(diagnostic: diagnostic)
+      end
+
+      def runtime_root_delegate
+        Ast::Merge::Runtime::Delegate.new(
+          name: "psych-yaml",
+          priority: 10,
+          surface_kinds: [:yaml_document],
+          languages: [:yaml],
+          capabilities: {merge: true},
+          metadata: {merger: self.class.name},
+        )
       end
     end
   end

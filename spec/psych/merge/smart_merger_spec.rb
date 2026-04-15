@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "ast/merge/rspec/shared_examples"
+
 RSpec.describe Psych::Merge::SmartMerger do
   describe "#initialize" do
     it "creates a merger with valid YAML" do
@@ -911,6 +913,10 @@ RSpec.describe Psych::Merge::SmartMerger do
   end
 
   describe "#merge_with_debug" do
+    let(:runtime_debug_merger) { described_class.new("key: template_value\n", "key: dest_value\n") }
+
+    it_behaves_like "Ast::Merge::RuntimeDebugContract"
+
     it "returns detailed merge information" do
       template = "key: template_value"
       dest = "key: dest_value"
@@ -923,6 +929,8 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(debug_result).to have_key(:decisions)
       expect(debug_result).to have_key(:template_analysis)
       expect(debug_result).to have_key(:dest_analysis)
+      expect(debug_result).to have_key(:debug)
+      expect(debug_result).to have_key(:runtime)
     end
 
     it "includes statistics about the merge" do
@@ -939,6 +947,16 @@ RSpec.describe Psych::Merge::SmartMerger do
       debug_result = merger.merge_with_debug
 
       expect(debug_result[:statistics][:total_decisions]).to be > 0
+    end
+
+    it "records a runtime session for the root YAML document" do
+      merger = described_class.new("key: template_value\n", "key: dest_value\n")
+      debug_result = merger.merge_with_debug
+
+      expect(merger.runtime_session).not_to be_nil
+      expect(debug_result.dig(:runtime, :summary, :operation_count)).to eq(1)
+      expect(debug_result.dig(:runtime, :operation_trees, 0, :surface, :surface_kind)).to eq(:yaml_document)
+      expect(debug_result.dig(:runtime, :operation_trees, 0, :delegate_name)).to eq("psych-yaml")
     end
   end
 
