@@ -12,21 +12,27 @@ module Psych
     #   emitter = Emitter.new
     #   emitter.emit_mapping_entry(key, value, leading_comments: comments)
     class Emitter < Ast::Merge::EmitterBase
+      include Ast::Merge::EmitterLineMetadataSupport
+
       # Initialize subclass-specific state
       def initialize_subclass_state(**options)
-        # YAML doesn't need comma tracking like JSON
+        initialize_line_metadata_state
       end
 
       # Clear subclass-specific state
       def clear_subclass_state
-        # Nothing to clear for YAML
+        clear_line_metadata_state
+      end
+
+      def emit_blank_line
+        append_line("")
       end
 
       # Emit a tracked comment from CommentTracker
       # @param comment [Hash] Comment with :text, :indent
       def emit_tracked_comment(comment)
         indent = " " * (comment[:indent] || 0)
-        @lines << "#{indent}# #{comment[:text]}"
+        append_line("#{indent}# #{comment[:text]}")
       end
 
       # Emit a comment line
@@ -40,7 +46,7 @@ module Psych
 
           @lines[-1] = "#{@lines[-1]} # #{text}"
         else
-          @lines << "#{current_indent}# #{text}"
+          append_line("#{current_indent}# #{text}")
         end
       end
 
@@ -50,20 +56,20 @@ module Psych
       # @param value [String] Value
       # @param style [Symbol] Style (:plain, :single_quoted, :double_quoted, :literal, :folded)
       # @param inline_comment [String, nil] Optional inline comment
-      def emit_scalar_entry(key, value, style: :plain, inline_comment: nil)
+      def emit_scalar_entry(key, value, style: :plain, inline_comment: nil, metadata: nil)
         formatted_value = format_scalar(value, style)
         line = "#{current_indent}#{key}: #{formatted_value}"
         line += " # #{inline_comment}" if inline_comment
-        @lines << line
+        append_line(line, metadata)
       end
 
       # Emit a mapping start (for nested mappings)
       #
       # @param key [String] Key name
       # @param anchor [String, nil] Anchor name (without &)
-      def emit_mapping_start(key, anchor: nil)
+      def emit_mapping_start(key, anchor: nil, metadata: nil)
         anchor_str = anchor ? " &#{anchor}" : ""
-        @lines << "#{current_indent}#{key}:#{anchor_str}"
+        append_line("#{current_indent}#{key}:#{anchor_str}", metadata)
         indent
       end
 
@@ -76,10 +82,10 @@ module Psych
       #
       # @param key [String, nil] Key name (nil for inline sequence)
       # @param anchor [String, nil] Anchor name
-      def emit_sequence_start(key, anchor: nil)
+      def emit_sequence_start(key, anchor: nil, metadata: nil)
         if key
           anchor_str = anchor ? " &#{anchor}" : ""
-          @lines << "#{current_indent}#{key}:#{anchor_str}"
+          append_line("#{current_indent}#{key}:#{anchor_str}", metadata)
           indent
         end
       end
@@ -88,10 +94,10 @@ module Psych
       #
       # @param value [String] Item value
       # @param inline_comment [String, nil] Optional inline comment
-      def emit_sequence_item(value, inline_comment: nil)
+      def emit_sequence_item(value, inline_comment: nil, metadata: nil)
         line = "#{current_indent}- #{value}"
         line += " # #{inline_comment}" if inline_comment
-        @lines << line
+        append_line(line, metadata)
       end
 
       # Emit a sequence end
@@ -103,15 +109,21 @@ module Psych
       #
       # @param key [String] Key name
       # @param anchor [String] Anchor name being referenced (without *)
-      def emit_alias(key, anchor)
-        @lines << "#{current_indent}#{key}: *#{anchor}"
+      def emit_alias(key, anchor, metadata: nil)
+        append_line("#{current_indent}#{key}: *#{anchor}", metadata)
       end
 
       # Emit a merge key with alias
       #
       # @param anchor [String] Anchor name to merge (without *)
-      def emit_merge_key(anchor)
-        @lines << "#{current_indent}<<: *#{anchor}"
+      def emit_merge_key(anchor, metadata: nil)
+        append_line("#{current_indent}<<: *#{anchor}", metadata)
+      end
+
+      def emit_raw_lines(raw_lines, metadata: nil)
+        raw_lines.each_with_index do |line, idx|
+          append_line(line.chomp, expanded_line_metadata(metadata, idx))
+        end
       end
 
       # Get the output as a YAML string

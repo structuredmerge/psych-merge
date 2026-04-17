@@ -163,6 +163,7 @@ module Psych
             preference: @preference,
             add_template_only_nodes: @add_template_only_nodes,
             remove_template_missing_nodes: @remove_template_missing_nodes,
+            resolution_mode: @resolution_mode,
             corruption_handling: @corruption_handling,
             recursive: @recursive,
             freeze_token: @freeze_token,
@@ -239,6 +240,7 @@ module Psych
           add_template_only_nodes: @add_template_only_nodes,
           add_template_only_sequence_items: @add_template_only_sequence_items,
           remove_template_missing_nodes: @remove_template_missing_nodes,
+          resolution_mode: @resolution_mode,
           corruption_handling: @corruption_handling,
           recursive: @recursive,
           match_refiner: @match_refiner,
@@ -276,6 +278,8 @@ module Psych
             add_template_only_nodes: @add_template_only_nodes,
             remove_template_missing_nodes: @remove_template_missing_nodes,
             recursive: @recursive,
+            resolution_mode: @resolution_mode,
+            unresolved_policy: @unresolved_policy.to_h,
           },
           metadata: {merger: self.class.name},
           options: {
@@ -283,6 +287,8 @@ module Psych
             add_template_only_nodes: @add_template_only_nodes,
             remove_template_missing_nodes: @remove_template_missing_nodes,
             recursive: @recursive,
+            resolution_mode: @resolution_mode,
+            unresolved_policy: @unresolved_policy.to_h,
           },
           language_chain: [:yaml],
           delegate_metadata: {merger: self.class.name},
@@ -293,6 +299,7 @@ module Psych
         complete_runtime_root_session!(
           root_operation: root_operation,
           replacement_text: merge_result.to_yaml,
+          unresolved_cases: merge_result.unresolved_cases,
           metadata: {
             stats: merge_result.statistics,
             decisions: merge_result.decision_summary,

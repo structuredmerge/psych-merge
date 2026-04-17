@@ -1217,7 +1217,6 @@ RSpec.describe Psych::Merge::SmartMerger do
     let(:runtime_debug_merger) { described_class.new("key: template_value\n", "key: dest_value\n") }
 
     it_behaves_like "Ast::Merge::RuntimeDebugContract"
-
     it "returns detailed merge information" do
       template = "key: template_value"
       dest = "key: dest_value"
@@ -1227,12 +1226,6 @@ RSpec.describe Psych::Merge::SmartMerger do
 
       expect(debug_result).to have_key(:content)
       expect(debug_result).to have_key(:statistics)
-      expect(debug_result).to have_key(:decisions)
-      expect(debug_result).to have_key(:template_analysis)
-      expect(debug_result).to have_key(:dest_analysis)
-      expect(debug_result).to have_key(:debug)
-      expect(debug_result).to have_key(:runtime)
-      expect(debug_result.dig(:debug, :corruption_handling)).to eq(:heal)
     end
 
     it "includes statistics about the merge" do
@@ -1260,6 +1253,74 @@ RSpec.describe Psych::Merge::SmartMerger do
       expect(debug_result.dig(:runtime, :operation_trees, 0, :surface, :surface_kind)).to eq(:yaml_document)
       expect(debug_result.dig(:runtime, :operation_trees, 0, :delegate_name)).to eq("psych-yaml")
     end
+  end
+
+  describe "unresolved runtime flow" do
+    let(:template_content) { "key: template_value\n" }
+    let(:destination_content) { "key: dest_value\n" }
+    let(:unresolved_runtime_merger) do
+      described_class.new(
+        template_content,
+        destination_content,
+        resolution_mode: :unresolved,
+      )
+    end
+    let(:expected_unresolved_surface_path) { 'document[0] > MappingEntry["key"]' }
+    let(:expected_unresolved_output_fragment) { "dest_value" }
+    let(:build_fresh_unresolved_merge_result) do
+      -> do
+        described_class.new(
+          template_content,
+          destination_content,
+          resolution_mode: :unresolved,
+        ).merge_result
+      end
+    end
+    let(:expected_replayed_output_fragment) { "key: template_value" }
+
+    it_behaves_like "Ast::Merge::UnresolvedRuntimeContract"
+    it_behaves_like "Ast::Merge::UnresolvedRuntimeDebugContract"
+    it_behaves_like "Ast::Merge::UnresolvedReviewStateTransportContract"
+  end
+
+  describe "recursive unresolved runtime flow" do
+    let(:unresolved_runtime_merger) do
+      described_class.new(
+        <<~YAML,
+          AllCops:
+            NewCops: enable
+        YAML
+        <<~YAML,
+          AllCops:
+            NewCops: disable
+        YAML
+        resolution_mode: :unresolved,
+        recursive: true,
+      )
+    end
+    let(:expected_unresolved_surface_path) { 'document[0] > MappingEntry["AllCops"] > MappingEntry["NewCops"]' }
+    let(:expected_unresolved_output_fragment) { "NewCops: disable" }
+    let(:build_fresh_unresolved_merge_result) do
+      -> do
+        described_class.new(
+          <<~YAML,
+            AllCops:
+              NewCops: enable
+          YAML
+          <<~YAML,
+            AllCops:
+              NewCops: disable
+          YAML
+          resolution_mode: :unresolved,
+          recursive: true,
+        ).merge_result
+      end
+    end
+    let(:expected_replayed_output_fragment) { "NewCops: enable" }
+
+    it_behaves_like "Ast::Merge::UnresolvedRuntimeContract"
+    it_behaves_like "Ast::Merge::UnresolvedRuntimeDebugContract"
+    it_behaves_like "Ast::Merge::UnresolvedReviewStateTransportContract"
   end
 
   describe "#valid?" do

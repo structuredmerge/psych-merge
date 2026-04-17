@@ -12,6 +12,8 @@ module Psych
     #   result.add_line("key: value", decision: :kept_template, source: :template)
     #   result.to_yaml # => "key: value\n"
     class MergeResult < Ast::Merge::MergeResultBase
+      include Ast::Merge::StructuredReviewApplySupport
+
       # Inherit decision constants from base class
       DECISION_KEPT_TEMPLATE = Ast::Merge::MergeResultBase::DECISION_KEPT_TEMPLATE
       DECISION_KEPT_DEST = Ast::Merge::MergeResultBase::DECISION_KEPT_DEST

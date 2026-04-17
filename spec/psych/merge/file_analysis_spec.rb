@@ -22,6 +22,22 @@ RSpec.describe Psych::Merge::FileAnalysis do
     let(:build_file_analysis) do
       ->(source, **opts) { described_class.new(source, **opts) }
     end
+
+    let(:analysis_expected_feature_profile) do
+      {
+        owner_selector: :mapping_entries,
+        match_key: :key_name,
+        read_strategy: :source_augmented_portable_write,
+        attachment_strategy: :tracker_layout_merge,
+        comment_style: :hash_comment,
+        render_family: :key_value_colon,
+        capabilities: {layout_aware: true, logical_owner: false},
+        logical_owners: {},
+        repair_policies: [],
+        surfaces: [],
+        delegation_policies: [],
+      }
+    end
   end
 
   describe "#initialize" do
@@ -43,26 +59,6 @@ RSpec.describe Psych::Merge::FileAnalysis do
       expect {
         described_class.new(yaml)
       }.to raise_error(Psych::SyntaxError)
-    end
-  end
-
-  describe "#feature_profile" do
-    it "advertises the YAML mapping-entry ruleset shape" do
-      analysis = described_class.new(<<~YAML)
-        key: value
-        other: stuff
-      YAML
-      profile = analysis.feature_profile
-
-      expect(profile.owner_selector).to eq(:mapping_entries)
-      expect(profile.match_key).to eq(:key_name)
-      expect(profile.read_strategy).to eq(:source_augmented_portable_write)
-      expect(profile.attachment_strategy).to eq(:tracker_layout_merge)
-      expect(profile.comment_style).to eq(:hash_comment)
-      expect(profile.render_family).to eq(:key_value_colon)
-      expect(profile.repair_policies).to eq([])
-      expect(profile.surfaces).to eq([])
-      expect(profile.delegation_policies).to eq([])
     end
   end
 

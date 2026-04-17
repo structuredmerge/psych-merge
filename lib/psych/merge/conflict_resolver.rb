@@ -22,6 +22,7 @@ module Psych
     #
     # @see Ast::Merge::ConflictResolverBase
     class ConflictResolver < Ast::Merge::ConflictResolverBase
+      include ::Ast::Merge::StructuredEmitterProvenanceSupport
       include ::Ast::Merge::TrailingGroups::DestIterate
       attr_reader :corruption_handling
 
@@ -43,7 +44,7 @@ module Psych
       # @param options [Hash] Additional options for forward compatibility
       # @param node_typing [Hash{Symbol,String => #call}, nil] Node typing configuration
       #   for per-node-type preferences
-      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, add_template_only_sequence_items: nil, remove_template_missing_nodes: false, corruption_handling: :heal, recursive: true, match_refiner: nil, node_typing: nil, **options)
+      def initialize(template_analysis, dest_analysis, preference: :destination, add_template_only_nodes: false, add_template_only_sequence_items: nil, remove_template_missing_nodes: false, resolution_mode: :eager, corruption_handling: :heal, recursive: true, match_refiner: nil, node_typing: nil, **options)
         super(
           strategy: :batch,
           preference: preference,
@@ -55,6 +56,7 @@ module Psych
           match_refiner: match_refiner,
           **options
         )
+        @resolution_mode = resolution_mode
         @corruption_handling = ::Ast::Merge::Healer.normalize_mode(corruption_handling)
         @add_template_only_sequence_items = add_template_only_sequence_items.nil? ? add_template_only_nodes : add_template_only_sequence_items
         @node_typing = node_typing
@@ -69,6 +71,7 @@ module Psych
       # @param result [MergeResult] Result object to populate
       def resolve_batch(result)
         DebugLogger.time("ConflictResolver#resolve") do
+          @result = result
           template_nodes = @template_analysis.statements
           dest_nodes = @dest_analysis.statements
 
@@ -92,12 +95,7 @@ module Psych
           )
 
           # Transfer emitter output to result
-          emitted_content = @emitter.to_s
-          unless emitted_content.empty?
-            emitted_content.lines.each do |line|
-              result.add_line(line.chomp, decision: MergeResult::DECISION_MERGED, source: :merged)
-            end
-          end
+          transfer_emitter_output(result)
 
           DebugLogger.debug("Conflict resolution complete", {
             template_nodes: template_nodes.size,
@@ -539,7 +537,9 @@ module Psych
       end
 
       def emit_preferred_node(template_node, dest_node, next_template_node: nil, next_dest_node: nil)
-        if preference_for_pair(template_node, dest_node) == :destination
+        provisional_winner = preference_for_pair(template_node, dest_node)
+        record_unresolved_choice(template_node: template_node, dest_node: dest_node, provisional_winner: provisional_winner)
+        if provisional_winner == :destination
           emit_node(dest_node, @dest_analysis, next_node: next_dest_node)
         else
           trim_overpreserved_destination_gap_for(
@@ -628,6 +628,68 @@ module Psych
         return node unless node
 
         Ast::Merge::NodeTyping.process(node, @node_typing)
+      end
+
+      def record_unresolved_choice(template_node:, dest_node:, provisional_winner:)
+        return unless unresolved_mode?
+        return unless template_node && dest_node
+
+        template_text = resolution_text_for(template_node)
+        dest_text = resolution_text_for(dest_node)
+
+        identifier = resolution_identifier(template_node, dest_node)
+        node_type = resolution_node_type(dest_node)
+        surface_path = resolution_surface_path(node_type, identifier, dest_node)
+        record_unresolved_node_choice(
+          result: @result,
+          template_node: template_node,
+          destination_node: dest_node,
+          template_text: template_text,
+          destination_text: dest_text,
+          provisional_winner: provisional_winner,
+          case_prefix: "yaml",
+          case_parts: [node_type, identifier],
+          surface_path: surface_path,
+          metadata: {
+            node_type: node_type,
+            identifier: identifier,
+            review_identity: review_identity_for_unresolved_choice(
+              template_text: template_text,
+              destination_text: dest_text,
+              provisional_winner: provisional_winner,
+              surface_path: surface_path,
+              node_type: node_type,
+              identifier: identifier,
+            ),
+          },
+          conflict_fields: {
+            node_type: node_type,
+            identifier: identifier,
+          },
+        )
+      end
+
+      def resolution_text_for(node)
+        return node.content if node.respond_to?(:content)
+        return node.text if node.respond_to?(:text)
+
+        node.to_s
+      end
+
+      def resolution_identifier(template_node, dest_node)
+        unresolved_identifier_for_nodes(dest_node, template_node, methods: [:key_name])
+      end
+
+      def resolution_node_type(node)
+        return node.class.name.split("::").last if node.respond_to?(:key_name)
+        return node.type if node.respond_to?(:type)
+
+        node.class.name.split("::").last
+      end
+
+      def resolution_surface_path(node_type, identifier, node)
+        segment = resolution_path_segment_for(node_type, identifier, node)
+        unresolved_surface_path_for(segment)
       end
 
       # Check if two nodes can be merged recursively (both are mappings or sequences)
@@ -723,49 +785,62 @@ module Psych
       # @param dest_node [MappingEntry, NodeWrapper] Destination node with nested structure
       # @param depth [Integer] Current recursion depth
       def emit_recursive_merge(template_node, dest_node, depth:, next_template_node: nil, next_dest_node: nil)
-        # Preserve the destination prelude (leading comments / blank lines) for
-        # recursively merged mapping entries, then emit the key line.
-        if dest_node.respond_to?(:key) && dest_node.key
-          # For empty flow mappings (e.g. `files: {}`), the dest key line includes
-          # the inline `{}`.  Emitting it as-is and then adding block children
-          # would produce invalid YAML.  Fall through to the template key line
-          # so children are emitted as proper block entries.
-          if preference_for_pair(template_node, dest_node) == :destination && !empty_flow_mapping?(dest_node)
-            emit_mapping_entry_prelude(dest_node, @dest_analysis)
-            emit_mapping_entry_key_line(dest_node, @dest_analysis)
-          else
-            emit_mapping_entry_prelude(
+        with_resolution_path_segment(dest_node, template_node) do
+          # Preserve the destination prelude (leading comments / blank lines) for
+          # recursively merged mapping entries, then emit the key line.
+          if dest_node.respond_to?(:key) && dest_node.key
+            # For empty flow mappings (e.g. `files: {}`), the dest key line includes
+            # the inline `{}`.  Emitting it as-is and then adding block children
+            # would produce invalid YAML.  Fall through to the template key line
+            # so children are emitted as proper block entries.
+            if preference_for_pair(template_node, dest_node) == :destination && !empty_flow_mapping?(dest_node)
+              emit_mapping_entry_prelude(dest_node, @dest_analysis)
+              emit_mapping_entry_key_line(dest_node, @dest_analysis)
+            else
+              emit_mapping_entry_prelude(
+                template_node,
+                @template_analysis,
+                comment_source_node: dest_node,
+                comment_analysis: @dest_analysis,
+              )
+              emit_mapping_entry_key_line(
+                template_node,
+                @template_analysis,
+                comment_source_node: dest_node,
+                comment_analysis: @dest_analysis,
+              )
+            end
+          end
+
+          if template_node.mapping? && dest_node.mapping?
+            emit_recursive_mapping_merge(
               template_node,
-              @template_analysis,
-              comment_source_node: dest_node,
-              comment_analysis: @dest_analysis,
+              dest_node,
+              depth: depth,
+              next_template_node: next_template_node,
+              next_dest_node: next_dest_node,
             )
-            emit_mapping_entry_key_line(
+          elsif template_node.sequence? && dest_node.sequence?
+            emit_recursive_sequence_merge(
               template_node,
-              @template_analysis,
-              comment_source_node: dest_node,
-              comment_analysis: @dest_analysis,
+              dest_node,
+              depth: depth,
+              next_template_node: next_template_node,
+              next_dest_node: next_dest_node,
             )
           end
         end
+      end
 
-        if template_node.mapping? && dest_node.mapping?
-          emit_recursive_mapping_merge(
-            template_node,
-            dest_node,
-            depth: depth,
-            next_template_node: next_template_node,
-            next_dest_node: next_dest_node,
-          )
-        elsif template_node.sequence? && dest_node.sequence?
-          emit_recursive_sequence_merge(
-            template_node,
-            dest_node,
-            depth: depth,
-            next_template_node: next_template_node,
-            next_dest_node: next_dest_node,
-          )
-        end
+      def resolution_path_segment_for(node_type, identifier, node)
+        unresolved_typed_path_segment(node_type, identifier: identifier, node: node, fallback: node_type)
+      end
+
+      def with_resolution_path_segment(*nodes)
+        with_first_unresolved_path_segment(
+          *nodes,
+          segment_builder: ->(node) { resolution_path_segment_for(resolution_node_type(node), resolution_identifier(node, node), node) }
+        ) { yield }
       end
 
       # Recursively merge two mapping values
@@ -1161,7 +1236,7 @@ module Psych
             unless lines.empty?
               emit_node_first_line(lines.shift, node, analysis, comment_source_node: comment_source_node, comment_analysis: comment_analysis)
               if lines.any?
-                @emitter.emit_raw_lines(lines)
+                @emitter.emit_raw_lines(lines, metadata: emitter_block_metadata(analysis, node.start_line + 1))
               end
               emit_node_trailing_comments(node, analysis, next_node: next_node)
             end
@@ -1198,7 +1273,7 @@ module Psych
           lines << line if line
         end
         if lines.any?
-          @emitter.emit_raw_lines(lines)
+          @emitter.emit_raw_lines(lines, metadata: emitter_block_metadata(analysis, content_start_line))
         end
         emit_node_trailing_comments(entry, analysis, next_node: next_node)
       end
@@ -1206,7 +1281,7 @@ module Psych
       # Emit a freeze block
       # @param freeze_node [FreezeNode] Freeze block to emit
       def emit_freeze_block(freeze_node)
-        @emitter.emit_raw_lines(freeze_node.lines)
+        @emitter.emit_raw_lines(freeze_node.lines, metadata: emitter_block_metadata(@dest_analysis, freeze_node.start_line))
       end
 
       def emit_mapping_entry_prelude(entry, analysis, comment_source_node: nil, comment_analysis: analysis)
@@ -1292,14 +1367,14 @@ module Psych
           comment_analysis: comment_analysis,
         )
         unless inline_region && !inline_region.empty?
-          @emitter.emit_raw_lines([line])
+          @emitter.emit_raw_lines([line], metadata: emitter_line_metadata(analysis, line_number: node_content_start_line(node)))
           return
         end
 
         existing_inline_region = node_inline_comment_region(node, analysis)
         line = strip_inline_comment_from_line(line, existing_inline_region) if existing_inline_region && !existing_inline_region.empty?
 
-        @emitter.emit_raw_lines([line])
+        @emitter.emit_raw_lines([line], metadata: emitter_line_metadata(analysis, line_number: node_content_start_line(node)))
         @emitter.emit_comment_region(
           inline_region,
           inline: true,
@@ -1326,7 +1401,10 @@ module Psych
         inline_region = node_inline_comment_region(node, analysis)
         return unless inline_region && !inline_region.empty?
 
-        @emitter.emit_raw_lines(promoted_inline_comment_lines(inline_region, node, analysis))
+        @emitter.emit_raw_lines(
+          promoted_inline_comment_lines(inline_region, node, analysis),
+          metadata: emitter_block_metadata(analysis, node_content_start_line(node)),
+        )
       end
 
       def emit_removed_sequence_item_comments(item, analysis, depth:)
@@ -2063,7 +2141,7 @@ module Psych
           line = analysis.line_at(line_num)
           lines << line if line && line.strip.empty?
         end
-        @emitter.emit_raw_lines(lines) if lines.any?
+        @emitter.emit_raw_lines(lines, metadata: emitter_block_metadata(analysis, start_line)) if lines.any?
       end
 
       def promoted_inline_comment_lines(inline_region, node, analysis)
