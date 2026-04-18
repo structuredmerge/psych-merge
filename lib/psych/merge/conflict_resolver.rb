@@ -24,6 +24,7 @@ module Psych
     class ConflictResolver < Ast::Merge::ConflictResolverBase
       include ::Ast::Merge::StructuredEmitterProvenanceSupport
       include ::Ast::Merge::TrailingGroups::DestIterate
+
       attr_reader :corruption_handling
 
       # Creates a new ConflictResolver
@@ -839,7 +840,7 @@ module Psych
       def with_resolution_path_segment(*nodes)
         with_first_unresolved_path_segment(
           *nodes,
-          segment_builder: ->(node) { resolution_path_segment_for(resolution_node_type(node), resolution_identifier(node, node), node) }
+          segment_builder: ->(node) { resolution_path_segment_for(resolution_node_type(node), resolution_identifier(node, node), node) },
         ) { yield }
       end
 
@@ -1858,10 +1859,10 @@ module Psych
 
       def first_node_leading_comment_region(nodes, analysis)
         first_node = Array(nodes).first
-        return nil unless first_node
+        return unless first_node
 
         region = node_leading_comment_region(first_node, analysis)
-        return nil unless region && !region.empty?
+        return unless region && !region.empty?
 
         region
       end
