@@ -64,4 +64,13 @@ RSpec.describe Psych::Merge do
       expect(Psych::Merge::SmartMerger).to be_a(Class)
     end
   end
+
+  describe ".register_backend!" do
+    it "registers yaml with TreeHaver" do
+      registrations = TreeHaver.registered_language(:yaml)
+
+      expect(registrations).to be_a(Hash)
+      expect(registrations.keys).to include(:psych)
+    end
+  end
 end

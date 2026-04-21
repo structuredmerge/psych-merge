@@ -315,6 +315,8 @@ module Psych
       end
 
       def parse_yaml
+        # Route through the Psych backend that Psych::Merge registers with
+        # TreeHaver during bootstrap.
         @tree = TreeHaver.parser_for(:yaml).parse(@source)
         @ast = @tree.root_node.inner_node
       rescue ::Psych::SyntaxError => e

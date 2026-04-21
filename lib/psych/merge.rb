@@ -36,6 +36,8 @@ module Psych
   # @see FileAnalysis Analyzes YAML structure
   # @see ConflictResolver Resolves content conflicts
   module Merge
+    BACKEND_REGISTRY = Struct.new(:registered, :mutex).new(false, Mutex.new)
+
     # Base error class for Psych::Merge
     # Inherits from Ast::Merge::Error for consistency across merge gems.
     class Error < Ast::Merge::Error; end
@@ -103,8 +105,27 @@ module Psych
     autoload :PartialTemplateMerger, "psych/merge/partial_template_merger"
     autoload :SmartMerger, "psych/merge/smart_merger"
     autoload :MappingMatchRefiner, "psych/merge/mapping_match_refiner"
+
+    class << self
+      def register_backend!
+        BACKEND_REGISTRY.mutex.synchronize do
+          return if BACKEND_REGISTRY.registered
+
+          TreeHaver.register_language(
+            :yaml,
+            backend_module: TreeHaver::Backends::Psych,
+            backend_type: :psych,
+            gem_name: "psych",
+          )
+
+          BACKEND_REGISTRY.registered = true
+        end
+      end
+    end
   end
 end
+
+Psych::Merge.register_backend!
 
 # Register with ast-merge's MergeGemRegistry for RSpec dependency tags
 # Only register if MergeGemRegistry is loaded (i.e., in test environment)
